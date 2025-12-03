@@ -9,6 +9,7 @@ function generateDocumentId() {
 }
 
 export async function GET(req: NextRequest) {
+  // ✅ Get cookie from req.cookies
   const ownerId = req.cookies.get('editor_owner_id')?.value;
   if (!ownerId) {
     return NextResponse.json({ documents: [] });
@@ -31,8 +32,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // ✅ Get cookie from req.cookies
   let ownerId = req.cookies.get('editor_owner_id')?.value;
-
+  
   const body = await req.json();
   const {
     name,
@@ -71,10 +73,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save document' }, { status: 500 });
   }
 
+  // ✅ Set cookie via response
   const response = NextResponse.json({ id: docId, success: true });
-
-  // Only set cookie if it wasn't present
-  if (!req.cookies.has('editor_owner_id')) {
+  if (!req.cookies.get('editor_owner_id')) {
     response.cookies.set('editor_owner_id', ownerId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -82,11 +83,11 @@ export async function POST(req: NextRequest) {
       path: '/',
     });
   }
-
   return response;
 }
 
 export async function PUT(req: NextRequest) {
+  // ✅ Get cookie from req.cookies
   const ownerId = req.cookies.get('editor_owner_id')?.value;
   if (!ownerId) {
     return NextResponse.json({ error: 'No session' }, { status: 400 });
@@ -119,6 +120,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  // ✅ Get cookie from req.cookies
   const ownerId = req.cookies.get('editor_owner_id')?.value;
   if (!ownerId) {
     return NextResponse.json({ error: 'No session' }, { status: 400 });
