@@ -4,6 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEditor } from '@/hooks/useEditor';
 import { useDocument, SavedDocument } from '@/hooks/useDocument';
 
+type NodePosition = {
+  node: Node;
+  offset: number;
+} | null;
+
 export default function EditTrackedPage() {
   const editor = useEditor();
   const docManager = useDocument();
@@ -29,10 +34,12 @@ export default function EditTrackedPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
-  const [trackedHtmlState, setTrackedHtmlState] = useState<string>('');
   const trackedRef = useRef<HTMLDivElement>(null);
+  const cleanTextRef = useRef<string>(editedText);
   const isApplyingChangeRef = useRef(false);
-  const isManualEditRef = useRef(false); // NEW: track manual typing
+  const cursorPositionRef = useRef<number | null>(null);
+  const lastHtmlRef = useRef<string>('');
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // === Escape HTML safely ===
   const escapeHtml = useCallback((text: string): string => {
@@ -56,7 +63,7 @@ export default function EditTrackedPage() {
     }
 
     try {
-      const diffs = DiffLib.diffWords(original, edited);
+      const diffs = DiffLib.diffWordsWithSpace(original, edited);
       let html = '';
       let groupContent = '';
       let inGroup = false;
@@ -106,24 +113,115 @@ export default function EditTrackedPage() {
   }, [escapeHtml]);
 
   // === Extract clean text from tracked HTML ===
-  const updateCleanFromTracked = useCallback(() => {
-    if (!trackedRef.current) return;
+  const getCleanTextFromTracked = useCallback((): string => {
+    if (!trackedRef.current) return '';
+    
     const clone = trackedRef.current.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('.change-action, .change-group').forEach((el) => el.remove());
-    clone.querySelectorAll('del').forEach((el) => el.remove());
-    clone.querySelectorAll('ins').forEach((el) => {
-      const parent = el.parentNode!;
-      while (el.firstChild) parent.insertBefore(el.firstChild, el);
-      parent.removeChild(el);
+    
+    // Remove UI elements
+    clone.querySelectorAll('.change-action').forEach(el => el.remove());
+    
+    // Process change groups
+    clone.querySelectorAll('.change-group').forEach(group => {
+      const parent = group.parentNode;
+      while (group.firstChild) {
+        parent?.insertBefore(group.firstChild, group);
+      }
+      parent?.removeChild(group);
     });
-    const newText = clone.textContent || '';
-    editor.setEditedText(newText);
-  }, [editor]);
+    
+    // Process inline changes
+    clone.querySelectorAll('del').forEach(el => el.remove());
+    clone.querySelectorAll('ins').forEach(ins => {
+      const parent = ins.parentNode;
+      while (ins.firstChild) {
+        parent?.insertBefore(ins.firstChild, ins);
+      }
+      parent?.removeChild(ins);
+    });
+    
+    return clone.textContent || '';
+  }, []);
+
+  // === Update clean text with cursor preservation ===
+  const updateCleanText = useCallback((newText?: string) => {
+    const text = newText || getCleanTextFromTracked();
+    cleanTextRef.current = text;
+    editor.setEditedText(text);
+  }, [editor, getCleanTextFromTracked]);
+
+  // === Debounced clean text update ===
+  const debouncedUpdateCleanText = useCallback(() => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      updateCleanText();
+    }, 300);
+  }, [updateCleanText]);
+
+  // === Restore cursor position ===
+  const restoreCursor = useCallback(() => {
+    if (!trackedRef.current || cursorPositionRef.current === null) return;
+    
+    const range = document.createRange();
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    let charCount = 0;
+    let node: Node | null = trackedRef.current.firstChild;
+    
+    const findNodeAndOffset = (targetCount: number): NodePosition => {
+      while (node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const textLength = node.textContent?.length || 0;
+          if (charCount + textLength >= targetCount) {
+            return {
+              node: node,
+              offset: targetCount - charCount
+            };
+          }
+          charCount += textLength;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          const childNodes = (node as Element).childNodes;
+          for (let i = 0; i < childNodes.length; i++) {
+            node = childNodes[i];
+            const result = findNodeAndOffset(targetCount);
+            if (result) return result;
+          }
+        }
+        node = node.nextSibling;
+      }
+      return null;
+    };
+
+    const result = findNodeAndOffset(cursorPositionRef.current);
+    if (result && result.node) {
+      try {
+        range.setStart(result.node, result.offset);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } catch (e) {
+        console.warn('Failed to restore cursor position', e);
+      }
+    }
+    
+    cursorPositionRef.current = null;
+  }, []);
 
   // === Apply accept or reject ===
   const applyChange = useCallback((group: HTMLElement, accept: boolean) => {
     if (isApplyingChangeRef.current) return;
     isApplyingChangeRef.current = true;
+
+    // Save cursor position before DOM changes
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const preSelectionRange = range.cloneRange();
+      preSelectionRange.selectNodeContents(trackedRef.current!);
+      preSelectionRange.setEnd(range.endContainer, range.endOffset);
+      cursorPositionRef.current = preSelectionRange.toString().length;
+    }
 
     if (accept) {
       group.querySelectorAll('ins').forEach((ins) => {
@@ -150,119 +248,70 @@ export default function EditTrackedPage() {
       group.remove();
     }
 
-    updateCleanFromTracked();
+    // Update clean text immediately
+    updateCleanText();
     setUnsavedChanges(true);
+    lastHtmlRef.current = trackedRef.current?.innerHTML || '';
 
-    // Reattach handlers after DOM change
+    // Reattach handlers and restore cursor
     setTimeout(() => {
-      if (trackedRef.current) {
-        trackedRef.current.querySelectorAll('.change-action').forEach((el) => el.remove());
-        trackedRef.current.querySelectorAll('.change-group').forEach((grp) => {
-          if (!grp.querySelector('.change-action')) {
-            const action = document.createElement('div');
-            action.className = 'change-action';
-            action.innerHTML = `
-              <button class="accept-change" title="Accept">✅</button>
-              <button class="reject-change" title="Reject">❌</button>
-            `;
-            grp.appendChild(action);
-            action.querySelector('.accept-change')?.addEventListener('click', (e) => {
-              e.stopPropagation();
-              applyChange(grp as HTMLElement, true);
-            });
-            action.querySelector('.reject-change')?.addEventListener('click', (e) => {
-              e.stopPropagation();
-              applyChange(grp as HTMLElement, false);
-            });
-          }
-        });
-      }
+      attachChangeHandlers();
+      restoreCursor();
+      isApplyingChangeRef.current = false;
     }, 0);
+  }, [updateCleanText, restoreCursor]);
 
-    isApplyingChangeRef.current = false;
-  }, [updateCleanFromTracked]);
-
-  // === Inject <ins> and .change-group for manual edits ===
-  const wrapNewInsertion = useCallback((node: Node, offset: number, text: string) => {
-    if (!trackedRef.current || isApplyingChangeRef.current) return;
-
-    const range = document.createRange();
-    range.setStart(node, offset);
-    range.setEnd(node, offset);
-
-    const ins = document.createElement('ins');
-    ins.className = 'manual-insert';
-    ins.textContent = text;
-
-    const group = document.createElement('span');
-    group.className = 'change-group';
-    group.appendChild(ins);
-
-    const action = document.createElement('div');
-    action.className = 'change-action';
-    action.innerHTML = `
-      <button class="accept-change" title="Accept">✅</button>
-      <button class="reject-change" title="Reject">❌</button>
-    `;
-    group.appendChild(action);
-
-    range.deleteContents();
-    range.insertNode(group);
-
-    // Focus after insertion
-    const newRange = document.createRange();
-    newRange.setStart(ins.firstChild || ins, (ins.firstChild?.textContent?.length || 0));
-    newRange.collapse(true);
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(newRange);
-
-    // Attach handlers
-    action.querySelector('.accept-change')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      applyChange(group, true);
+  // === Attach accept/reject handlers ===
+  const attachChangeHandlers = useCallback(() => {
+    if (!trackedRef.current) return;
+    
+    trackedRef.current.querySelectorAll('.change-action').forEach(el => el.remove());
+    
+    trackedRef.current.querySelectorAll('.change-group').forEach(group => {
+      if (group.querySelector('.change-action')) return;
+      
+      const action = document.createElement('div');
+      action.className = 'change-action';
+      action.innerHTML = `
+        <button class="accept-change" title="Accept">✅</button>
+        <button class="reject-change" title="Reject">❌</button>
+      `;
+      group.appendChild(action);
+      
+      action.querySelector('.accept-change')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        applyChange(group as HTMLElement, true);
+      });
+      
+      action.querySelector('.reject-change')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        applyChange(group as HTMLElement, false);
+      });
     });
-    action.querySelector('.reject-change')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      applyChange(group, false);
-    });
+  }, [applyChange]);
 
+  // === Handle manual edits in tracked view ===
+  const handleTrackedInput = useCallback(() => {
+    if (isApplyingChangeRef.current) return;
+    
     setUnsavedChanges(true);
-    updateCleanFromTracked();
-  }, [applyChange, updateCleanFromTracked]);
+    lastHtmlRef.current = trackedRef.current?.innerHTML || '';
+    
+    // Debounced update to prevent performance issues
+    debouncedUpdateCleanText();
+  }, [debouncedUpdateCleanText]);
 
-  // === Handle manual edits with beforeinput (modern approach) ===
-  const handleBeforeInput = useCallback((e: InputEvent) => {
-    if (isApplyingChangeRef.current || e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
-      return;
-    }
-
-    if (e.inputType === 'insertText' && e.data) {
-      e.preventDefault();
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) return;
-
+  // === Save cursor position before interaction ===
+  const handleMouseDown = useCallback(() => {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
-      const { startContainer, startOffset } = range;
-
-      // Only wrap if inserting into a text node (not inside <ins> or <del>)
-      if (startContainer.nodeType === Node.TEXT_NODE) {
-        const parentElement = startContainer.parentElement;
-        // If inside a tracked group or ins/del, let it flow normally
-        if (
-          parentElement?.closest('.change-group') ||
-          parentElement?.closest('ins') ||
-          parentElement?.closest('del')
-        ) {
-          // Allow normal behavior — diff will capture later or it's already tracked
-          return;
-        }
-      }
-
-      // Wrap new text in change markup
-      wrapNewInsertion(startContainer, startOffset, e.data);
+      const preSelectionRange = range.cloneRange();
+      preSelectionRange.selectNodeContents(trackedRef.current!);
+      preSelectionRange.setEnd(range.endContainer, range.endOffset);
+      cursorPositionRef.current = preSelectionRange.toString().length;
     }
-  }, [wrapNewInsertion]);
+  }, []);
 
   // === Load document into editor and tracked view ===
   const loadDocument = useCallback(
@@ -278,11 +327,20 @@ export default function EditTrackedPage() {
       setDocumentId(doc.id);
       setViewMode('tracked');
 
-      const html = doc.tracked_html || generateDiffHtml(doc.original_text, doc.edited_text);
-      setTrackedHtmlState(html);
+      // Generate tracked HTML with fallback
+      const html = doc.tracked_html ?? generateDiffHtml(doc.original_text, doc.edited_text);
+      
+      // Set content and initialize
+      if (trackedRef.current) {
+        trackedRef.current.innerHTML = html || '';
+        lastHtmlRef.current = html || '';
+        cleanTextRef.current = doc.edited_text;
+        attachChangeHandlers();
+      }
+      
       setUnsavedChanges(false);
     },
-    [editor, setDocumentId, setViewMode, generateDiffHtml]
+    [editor, setDocumentId, setViewMode, generateDiffHtml, attachChangeHandlers]
   );
 
   // === Save to backend ===
@@ -296,12 +354,13 @@ export default function EditTrackedPage() {
     setSaveError(null);
 
     try {
-      const clean = editedText;
       const trackedHtmlContent = trackedRef.current?.innerHTML || null;
+      lastHtmlRef.current = trackedHtmlContent || '';
 
+      // ✅ Convert null → undefined to match API expectation
       await saveProgressToApi(
         documentId,
-        clean,
+        cleanTextRef.current,
         inputText,
         trackedHtmlContent ?? undefined
       );
@@ -315,38 +374,18 @@ export default function EditTrackedPage() {
     }
   };
 
-  // === Detect unsaved changes ===
+  // === Handle before unload ===
   useEffect(() => {
-    if (currentDoc) {
-      const hasChanges = trackedHtmlState !== (currentDoc.tracked_html || '');
-      setUnsavedChanges(hasChanges);
-    }
-  }, [trackedHtmlState, currentDoc]);
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (unsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
 
-  // === Attach accept/reject handlers on render & after load ===
-  useEffect(() => {
-    if (trackedRef.current) {
-      trackedRef.current.querySelectorAll('.change-action').forEach((el) => el.remove());
-      trackedRef.current.querySelectorAll('.change-group').forEach((group) => {
-        if (group.querySelector('.change-action')) return;
-        const action = document.createElement('div');
-        action.className = 'change-action';
-        action.innerHTML = `
-          <button class="accept-change" title="Accept">✅</button>
-          <button class="reject-change" title="Reject">❌</button>
-        `;
-        group.appendChild(action);
-        action.querySelector('.accept-change')?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          applyChange(group as HTMLElement, true);
-        });
-        action.querySelector('.reject-change')?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          applyChange(group as HTMLElement, false);
-        });
-      });
-    }
-  }, [trackedHtmlState, applyChange]);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [unsavedChanges]);
 
   // === Load diff.js from CDN ===
   useEffect(() => {
@@ -354,6 +393,9 @@ export default function EditTrackedPage() {
       const script = document.createElement('script');
       script.src = 'https://unpkg.com/diff@5.1.0/dist/diff.min.js';
       script.async = true;
+      script.onload = () => {
+        console.log('Diff library loaded');
+      };
       document.head.appendChild(script);
       return () => {
         if (document.head.contains(script)) {
@@ -363,16 +405,19 @@ export default function EditTrackedPage() {
     }
   }, []);
 
-  // === Setup event listeners on trackedRef ===
+  // === Initial clean text sync ===
   useEffect(() => {
-    const el = trackedRef.current;
-    if (el) {
-      el.addEventListener('beforeinput', handleBeforeInput as EventListener);
-      return () => {
-        el.removeEventListener('beforeinput', handleBeforeInput as EventListener);
-      };
-    }
-  }, [handleBeforeInput]);
+    cleanTextRef.current = editedText;
+  }, [editedText]);
+
+  // === Cleanup timeouts ===
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // === Render ===
   return (
@@ -412,7 +457,7 @@ export default function EditTrackedPage() {
       {/* Main Content */}
       <div className="flex-1 p-5 overflow-y-auto">
         <h2 className="text-xl font-bold mb-4">
-          Tracked Changes Viewer (editor.js Compatible)
+          Tracked Changes Viewer
         </h2>
 
         {!currentDoc ? (
@@ -441,8 +486,9 @@ export default function EditTrackedPage() {
                 id="tracked"
                 ref={trackedRef}
                 contentEditable={!isApplyingChangeRef.current}
-                dangerouslySetInnerHTML={{ __html: trackedHtmlState }}
-                className="content-box p-3 bg-white border border-[#ddd] rounded whitespace-pre-wrap text-sm max-h-[40vh] overflow-y-auto"
+                onInput={handleTrackedInput}
+                onMouseDown={handleMouseDown}
+                className="content-box p-3 bg-white border border-[#ddd] rounded whitespace-pre-wrap text-sm max-h-[40vh] overflow-y-auto focus:outline-none focus:ring-1 focus:ring-blue-500"
                 style={{ whiteSpace: 'pre-wrap' }}
               />
               {saveError && <p className="text-red-600 text-sm mt-1">{saveError}</p>}
@@ -454,7 +500,7 @@ export default function EditTrackedPage() {
                 id="clean"
                 className="content-box p-3 bg-white border border-[#ddd] rounded whitespace-pre-wrap text-sm max-h-[40vh] overflow-y-auto"
               >
-                {editedText || 'No content'}
+                {cleanTextRef.current || 'No content'}
               </div>
             </div>
           </div>
@@ -467,38 +513,55 @@ export default function EditTrackedPage() {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
 
+        #tracked:focus {
+          outline: none;
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+        }
+
         del {
           background-color: #ffe6e6;
           text-decoration: line-through;
-          margin: 0 2px;
           display: inline;
+          padding: 0 1px;
+          border-radius: 2px;
         }
         ins {
           background-color: #e6ffe6;
           text-decoration: none;
-          margin: 0 2px;
           display: inline;
+          padding: 0 1px;
+          border-radius: 2px;
         }
 
         .change-group {
           position: relative;
-          display: inline-block;
+          display: inline;
+          padding: 0 1px;
+          border-radius: 2px;
         }
 
         .change-action {
           position: absolute;
-          top: -22px;
-          left: 0;
+          top: -24px;
+          left: 50%;
+          transform: translateX(-50%);
           background: white;
           border: 1px solid #ddd;
           border-radius: 4px;
           padding: 2px;
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
           z-index: 100;
+          display: flex;
           gap: 4px;
-          align-items: center;
-          display: none;
-          flex-direction: row;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.2s;
+        }
+
+        .change-group:hover .change-action {
+          opacity: 1;
+          pointer-events: all;
         }
 
         .change-action button {
@@ -508,24 +571,24 @@ export default function EditTrackedPage() {
           border-radius: 3px;
           background: white;
           cursor: pointer;
+          margin: 0;
         }
         .change-action button:hover {
           background: #f0f0f0;
         }
         .change-action button.accept-change {
           color: green;
+          border-color: green;
         }
         .change-action button.reject-change {
           color: red;
-        }
-
-        .change-group:hover .change-action {
-          display: flex !important;
+          border-color: red;
         }
 
         .content-box {
           white-space: pre-wrap;
           font-size: 14px;
+          line-height: 1.5;
         }
       `}</style>
     </div>
