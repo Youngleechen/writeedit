@@ -46,7 +46,7 @@ export function useDocument() {
     const {
       inputText,
       editedText,
-      editLevel,          // ✅ declared here
+      editLevel,
       selectedModel,
       customInstruction,
     } = editor;
@@ -54,8 +54,20 @@ export function useDocument() {
     const originalText = inputText.trim();
     const finalText = editedText.trim();
 
+    // 🔍 DEBUG LOGS — TEMPORARY
+    console.log('=== DEBUG: SaveDocument Attempt ===');
+    console.log('inputText (raw):', JSON.stringify(inputText));
+    console.log('editedText (raw):', JSON.stringify(editedText));
+    console.log('originalText (trimmed):', JSON.stringify(originalText));
+    console.log('finalText (trimmed):', JSON.stringify(finalText));
+    console.log('finalText length:', finalText.length);
+    console.log('finalText includes placeholder?', finalText.includes('Result will appear here'));
+    console.log('Both non-empty?', !!originalText && !!finalText);
+    console.log('=====================================');
+
     if (!originalText || !finalText || finalText.includes('Result will appear here')) {
       setError('No valid content to save');
+      console.warn('❌ Save blocked: no valid content');
       return;
     }
 
@@ -72,7 +84,7 @@ export function useDocument() {
           name,
           originalText,
           editedText: finalText,
-          level: editLevel,     // ✅ used correctly here
+          level: editLevel,
           model: selectedModel,
           customInstruction,
         }),
@@ -84,6 +96,7 @@ export function useDocument() {
       editor.setDocumentId(id);
       await fetchDocuments();
       setError(null);
+      console.log('✅ Document saved successfully with ID:', id);
     } catch (err: any) {
       setError(err.message);
       console.error('Save failed:', err);
