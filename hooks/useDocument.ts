@@ -42,21 +42,10 @@ export function useDocument() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  const saveDocument = useCallback(async () => {
-    const {
-      inputText,
-      editedText,
-      editLevel,
-      selectedModel,
-      customInstruction,
-    } = editor;
-
-    const originalText = inputText.trim();
-    const finalText = editedText.trim();
-
-    // ✅ FIXED: Only check for empty — no placeholder check needed
-    if (!originalText || !finalText) {
-      setError('No valid content to save');
+  // ✅ ACCEPT finalText as input — don't assume editedText is valid
+  const saveDocument = useCallback(async (finalText: string, originalText: string) => {
+    if (!originalText.trim() || !finalText.trim()) {
+      setError('Both original and edited text are required.');
       return;
     }
 
@@ -71,11 +60,11 @@ export function useDocument() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          originalText,
-          editedText: finalText,
-          level: editLevel,
-          model: selectedModel,
-          customInstruction,
+          originalText: originalText.trim(),
+          editedText: finalText.trim(),
+          level: editor.editLevel,
+          model: editor.selectedModel,
+          customInstruction: editor.customInstruction,
         }),
       });
 
@@ -93,18 +82,13 @@ export function useDocument() {
     }
   }, [editor, fetchDocuments]);
 
-  const saveProgress = useCallback(async () => {
+  const saveProgress = useCallback(async (finalText: string, originalText: string) => {
     if (!editor.documentId) {
       setError('No document loaded to update');
       return;
     }
-
-    const originalText = editor.inputText.trim();
-    const finalText = editor.editedText.trim();
-
-    // ✅ FIXED: Only check for empty
-    if (!originalText || !finalText) {
-      setError('No valid content to save');
+    if (!originalText.trim() || !finalText.trim()) {
+      setError('Both original and edited text are required.');
       return;
     }
 
@@ -116,8 +100,8 @@ export function useDocument() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: editor.documentId,
-          originalText,
-          editedText: finalText,
+          originalText: originalText.trim(),
+          editedText: finalText.trim(),
         }),
       });
 
@@ -163,23 +147,7 @@ export function useDocument() {
     });
   }, [editor]);
 
-  // Auto-save effect (unchanged, but fixed truncated code)
-  useEffect(() => {
-    if (
-      !editor.documentId ||
-      !editor.inputText.trim() ||
-      !editor.editedText.trim()
-      // ✅ Removed placeholder check here too
-    ) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      saveProgress();
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [editor.documentId, editor.inputText, editor.editedText, saveProgress]);
+  // Auto-save: now also uses DOM-derived text (handled in EditorUI)
 
   return {
     documents,

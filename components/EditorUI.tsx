@@ -1,7 +1,7 @@
 // /components/EditorUI.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEditor, EditLevel } from '@/hooks/useEditor';
 import { useDocument, SavedDocument } from '@/hooks/useDocument';
 import { TrackedChangesView } from '@/components/TrackedChangesView';
@@ -15,6 +15,8 @@ const BASE_MODELS = [
 export function EditorUI() {
   const editor = useEditor();
   const docManager = useDocument();
+  const trackedRef = useRef<HTMLDivElement>(null); // ← for DOM extraction
+
   const {
     documents,
     isLoading: isDocLoading,
@@ -49,7 +51,7 @@ export function EditorUI() {
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(true);
 
-  // Auto-name document from input text
+  // Auto-name document
   useEffect(() => {
     if (!documentName && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
@@ -57,9 +59,38 @@ export function EditorUI() {
     }
   }, [inputText, documentName]);
 
+  // 🔁 EXACT REPLICATION of extractCleanTextFromTrackedDOM from editor.js
+  const extractCleanTextFromTrackedDOM = useCallback((): string => {
+    if (!trackedRef.current) return editedText;
+
+    const clone = trackedRef.current.cloneNode(true) as HTMLElement;
+
+    // Remove UI buttons
+    clone.querySelectorAll('.change-action').forEach(el => el.remove());
+
+    // Remove <del> (rejected content)
+    clone.querySelectorAll('del').forEach(el => el.remove());
+
+    // Replace <ins> with plain text
+    clone.querySelectorAll('ins').forEach(el => {
+      const text = document.createTextNode(el.textContent || '');
+      el.replaceWith(text);
+    });
+
+    // Unwrap .change-group
+    clone.querySelectorAll('.change-group').forEach(group => {
+      while (group.firstChild) {
+        group.parentNode?.insertBefore(group.firstChild, group);
+      }
+      group.remove();
+    });
+
+    return clone.textContent?.trim() || editedText;
+  }, [editedText]);
+
   const handleCopy = async () => {
-    const textToCopy = editedText.trim();
-    if (!textToCopy || textToCopy.includes('Result will appear here')) return;
+    const textToCopy = extractCleanTextFromTrackedDOM();
+    if (!textToCopy.trim()) return;
     try {
       await navigator.clipboard.writeText(textToCopy);
       alert('✅ Copied!');
@@ -69,8 +100,9 @@ export function EditorUI() {
   };
 
   const handleDownload = () => {
-    if (!editedText.trim()) return;
-    const blob = new Blob([editedText], { type: 'text/plain' });
+    const textToDownload = extractCleanTextFromTrackedDOM();
+    if (!textToDownload.trim()) return;
+    const blob = new Blob([textToDownload], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -81,14 +113,39 @@ export function EditorUI() {
     URL.revokeObjectURL(url);
   };
 
-  const handleAcceptChange = useCallback((group: any) => {
-    console.log('Accepted:', group);
-    // In future: update clean text, auto-save
+  const handleAcceptChange = useCallback(() => {
+    // TrackedChangesView handles DOM update
+    // We’ll extract fresh text on save/copy
   }, []);
 
-  const handleRejectChange = useCallback((group: any) => {
-    console.log('Rejected:', group);
+  const handleRejectChange = useCallback(() => {
+    // Same
   }, []);
+
+  // ✅ SAVE HANDLERS: Extract final text at save time
+  const handleSaveDocument = async () => {
+    const original = inputText;
+    const final = extractCleanTextFromTrackedDOM();
+
+    if (!original.trim() || !final.trim()) {
+      alert('No valid content to save. Please run “Edit” first.');
+      return;
+    }
+
+    await saveDocument(final, original);
+  };
+
+  const handleSaveProgress = async () => {
+    const original = inputText;
+    const final = extractCleanTextFromTrackedDOM();
+
+    if (!original.trim() || !final.trim()) {
+      alert('No valid content to save.');
+      return;
+    }
+
+    await saveProgress(final, original);
+  };
 
   return (
     <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6">
@@ -103,7 +160,7 @@ export function EditorUI() {
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Paste your text here..."
           rows={8}
-          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black" // 👈 added text-black
+          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black"
           disabled={isLoading}
         />
       </div>
@@ -133,7 +190,7 @@ export function EditorUI() {
               value={customInstruction}
               onChange={(e) => setCustomInstruction(e.target.value)}
               placeholder="Enter custom instruction..."
-              className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black" // 👈 added text-black
+              className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black"
             />
           )}
         </div>
@@ -143,7 +200,7 @@ export function EditorUI() {
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white" // 👈 added text-black & bg-white
+            className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
             disabled={isLoading}
           >
             {BASE_MODELS.map((model) => (
@@ -152,7 +209,7 @@ export function EditorUI() {
               </option>
             ))}
           </select>
-          <label className="flex items-center text-sm text-black"> {/* 👈 ensure label text is visible */}
+          <label className="flex items-center text-sm text-black">
             <input
               type="checkbox"
               checked={isEditorialBoard}
@@ -185,12 +242,12 @@ export function EditorUI() {
               value={documentName}
               onChange={(e) => setDocumentName(e.target.value)}
               placeholder="Document name..."
-              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black" // 👈 added text-black
+              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black"
             />
             <div className="flex gap-2">
               <button
                 id="save-document-btn"
-                onClick={saveDocument}
+                onClick={handleSaveDocument}
                 disabled={isLoading || isDocLoading}
                 className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
               >
@@ -198,10 +255,9 @@ export function EditorUI() {
               </button>
               <button
                 id="save-progress-btn"
-                onClick={saveProgress}
+                onClick={handleSaveProgress}
                 disabled={!documentId || isLoading || isDocLoading}
                 className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
-                title={documentId ? 'Save progress to current document' : 'Save a document first'}
               >
                 🔄 Save Progress
               </button>
@@ -237,7 +293,6 @@ export function EditorUI() {
                               loadDocument(doc);
                             }}
                             className="text-xs text-blue-600"
-                            title="Load"
                           >
                             ↩️
                           </button>
@@ -247,7 +302,6 @@ export function EditorUI() {
                               if (confirm('Delete this document?')) deleteDocument(doc.id);
                             }}
                             className="text-xs text-red-600"
-                            title="Delete"
                           >
                             ×
                           </button>
@@ -262,7 +316,7 @@ export function EditorUI() {
         )}
       </div>
 
-      {/* Apply Button */}
+      {/* Edit Button — renamed from "Apply Edit" */}
       <div>
         <button
           id="edit-btn"
@@ -281,7 +335,7 @@ export function EditorUI() {
       </div>
 
       {/* Result Section */}
-      {editedText && (
+      {(editedText || isLoading) && (
         <div>
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold">Edited Result</h2>
@@ -326,8 +380,9 @@ export function EditorUI() {
             </button>
           </div>
 
-          {/* Result display area – already has color: #000 */}
+          {/* ⚠️ Critical: Wrap with trackedRef */}
           <div
+            ref={trackedRef}
             className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm"
             style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap', color: '#000' }}
           >
