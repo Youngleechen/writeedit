@@ -50,9 +50,12 @@ export function useEditor() {
     }
   }, [state.inputText]);
 
-  // --- Setters (all use functional updates for consistency) ---
+  // --- Setters ---
   const setInputText = (text: string) =>
     setState((prev) => ({ ...prev, inputText: text }));
+
+  const setEditedText = (text: string) =>
+    setState((prev) => ({ ...prev, editedText: text }));
 
   const setEditLevel = (level: EditLevel) =>
     setState((prev) => ({ ...prev, editLevel: level }));
@@ -72,7 +75,7 @@ export function useEditor() {
   const setDocumentId = (id: string | null) =>
     setState((prev) => ({ ...prev, documentId: id }));
 
-  // --- Load a full document (called by useDocument)
+  // --- Load a full document
   const loadDocument = (
     documentId: string,
     docData: {
@@ -90,11 +93,11 @@ export function useEditor() {
     });
 
     setState((prev) => ({
-      ...prev, // 👈 Preserve other state if needed (though we usually replace all)
+      ...prev,
       inputText: docData.originalText || '',
       editedText: docData.editedText || '',
-      trackedHtml: '', // Will be regenerated when needed
-      changeCount: 0, // Note: real count comes from applyEdit or diffing
+      trackedHtml: '',
+      changeCount: 0,
       editLevel: (docData.level as EditLevel) || 'proofread',
       customInstruction: docData.customInstruction || '',
       selectedModel: docData.model || DEFAULT_MODEL,
@@ -108,10 +111,8 @@ export function useEditor() {
     }));
   };
 
-  // --- Reset editor
   const reset = () => {
-    setState((prev) => ({
-      ...prev,
+    setState({
       inputText: '',
       editedText: '',
       trackedHtml: '',
@@ -125,7 +126,7 @@ export function useEditor() {
       isEditorialBoard: false,
       documentId: null,
       wordCount: 0,
-    }));
+    });
   };
 
   // --- Apply Edit via API
@@ -179,6 +180,7 @@ export function useEditor() {
   return {
     ...state,
     setInputText,
+    setEditedText,
     setEditLevel,
     setCustomInstruction,
     setSelectedModel,

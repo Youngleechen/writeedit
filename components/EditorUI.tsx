@@ -12,7 +12,7 @@ const BASE_MODELS = [
   { id: 'google/gemini-flash-1.5-8b:free', name: 'Gemini Flash 1.5' },
 ];
 
-// 🔍 Wrapper to log what TrackedChangesView receives
+// 🔍 Wrapper to log TrackedChangesView props
 function TrackedChangesViewWithLogs({
   originalText,
   editedText,
@@ -55,7 +55,6 @@ export function EditorUI() {
     saveDocument,
     saveProgress,
     deleteDocument,
-    loadDocument,
   } = docManager;
 
   const {
@@ -83,7 +82,7 @@ export function EditorUI() {
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(true);
 
-  // ✅ Auto-generate name only if user hasn't typed anything
+  // ✅ Auto-generate name ONLY if user hasn't typed anything
   useEffect(() => {
     if (!documentName.trim() && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
@@ -91,7 +90,7 @@ export function EditorUI() {
     }
   }, [inputText]);
 
-  // 🔍 LOG: Track critical state changes
+  // 🔍 LOG: Track key state changes
   useEffect(() => {
     console.log('[EditorUI] 📡 State updated:', {
       documentId,
@@ -126,30 +125,23 @@ export function EditorUI() {
 
   const handleCopy = async () => {
     const textToCopy = extractCleanTextFromTrackedDOM();
-    if (!textToCopy.trim()) {
-      console.warn('[EditorUI] Copy skipped: no text to copy');
-      return;
-    }
+    if (!textToCopy.trim()) return;
     try {
       await navigator.clipboard.writeText(textToCopy);
       alert('✅ Copied!');
     } catch (err) {
-      console.error('[EditorUI] Copy failed:', err);
       alert('Failed to copy.');
     }
   };
 
   const handleDownload = () => {
     const textToDownload = extractCleanTextFromTrackedDOM();
-    if (!textToDownload.trim()) {
-      console.warn('[EditorUI] Download skipped: no text to download');
-      return;
-    }
+    if (!textToDownload.trim()) return;
     const blob = new Blob([textToDownload], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `edited-document-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.download = `edited-document-${new Date().toISOString().slice(0,10)}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -159,6 +151,7 @@ export function EditorUI() {
   const handleAcceptChange = useCallback(() => {}, []);
   const handleRejectChange = useCallback(() => {}, []);
 
+  // ✅ Save full document (new)
   const handleSaveDocument = async () => {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
@@ -166,31 +159,46 @@ export function EditorUI() {
       alert('No valid content to save. Please run “Edit” first.');
       return;
     }
-    await saveDocument(final, original, documentName);
-    setDocumentName('');
+    // ✅ Pass (final, original, name)
+    const id = await saveDocument(final, original, documentName);
+    if (id) {
+      editor.setDocumentId(id);
+      setDocumentName('');
+    }
   };
 
+  // ✅ Save progress (update existing)
   const handleSaveProgress = async () => {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
-    if (!original.trim() || !final.trim()) {
-      alert('No valid content to save.');
+    if (!original.trim() || !final.trim() || !documentId) {
+      alert('No valid content or active document to update.');
       return;
     }
-    await saveProgress(final, original);
+    // ✅ Pass (id, final, original)
+    const success = await saveProgress(documentId, final, original);
+    if (success) {
+      console.log('[EditorUI] Progress saved');
+    }
   };
 
-  // 🔍 LOG: Document click handler
+  // ✅ Load document directly into editor
   const handleDocumentClick = (doc: SavedDocument) => {
     console.log('[EditorUI] 🖱️ Document clicked:', {
       id: doc.id,
       name: doc.name,
       originalTextLength: doc.original_text.length,
       editedTextLength: doc.edited_text.length,
-      originalPreview: doc.original_text.substring(0, 60),
-      editedPreview: doc.edited_text.substring(0, 60),
     });
-    loadDocument(doc);
+
+    // ✅ Call editor.loadDocument directly
+    editor.loadDocument(doc.id, {
+      originalText: doc.original_text,
+      editedText: doc.edited_text,
+      level: doc.level,
+      model: doc.model,
+      customInstruction: doc.custom_instruction,
+    });
   };
 
   return (

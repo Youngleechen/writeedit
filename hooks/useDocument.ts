@@ -2,7 +2,6 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { useEditor } from './useEditor';
 
 export interface SavedDocument {
   id: string;
@@ -20,7 +19,6 @@ export function useDocument() {
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const editor = useEditor();
 
   const fetchDocuments = useCallback(async () => {
     setIsLoading(true);
@@ -42,7 +40,7 @@ export function useDocument() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  // ✅ Updated: accept optional `name`
+  // ✅ Save: returns the new document ID
   const saveDocument = useCallback(async (
     finalText: string,
     originalText: string,
@@ -50,10 +48,9 @@ export function useDocument() {
   ) => {
     if (!originalText.trim() || !finalText.trim()) {
       setError('Both original and edited text are required.');
-      return;
+      return null;
     }
 
-    // ✅ Use provided name, or auto-generate
     const docName = name?.trim() ||
       originalText.substring(0, 50).replace(/\s+/g, ' ').trim() + 
       (originalText.length > 50 ? '...' : '');
@@ -68,34 +65,30 @@ export function useDocument() {
           name: docName,
           originalText: originalText.trim(),
           editedText: finalText.trim(),
-          level: editor.editLevel,
-          model: editor.selectedModel,
-          customInstruction: editor.customInstruction,
+          level: 'proofread', // or pass as param if needed
+          model: 'x-ai/grok-4.1-fast:free',
+          customInstruction: '',
         }),
       });
 
       if (!res.ok) throw new Error('Failed to save document');
       const { id } = await res.json();
-
-      editor.setDocumentId(id);
       await fetchDocuments();
-      setError(null);
+      return id; // ✅ Return ID so caller can set it
     } catch (err: any) {
       setError(err.message);
       console.error('Save failed:', err);
+      return null;
     } finally {
       setIsLoading(false);
     }
-  }, [editor, fetchDocuments]);
+  }, [fetchDocuments]);
 
-  const saveProgress = useCallback(async (finalText: string, originalText: string) => {
-    if (!editor.documentId) {
-      setError('No document loaded to update');
-      return;
-    }
+  // ✅ Save progress: updates existing doc
+  const saveProgress = useCallback(async (id: string, finalText: string, originalText: string) => {
     if (!originalText.trim() || !finalText.trim()) {
       setError('Both original and edited text are required.');
-      return;
+      return false;
     }
 
     setIsLoading(true);
@@ -105,7 +98,7 @@ export function useDocument() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: editor.documentId,
+          id,
           originalText: originalText.trim(),
           editedText: finalText.trim(),
         }),
@@ -113,14 +106,15 @@ export function useDocument() {
 
       if (!res.ok) throw new Error('Failed to update document');
       await fetchDocuments();
-      setError(null);
+      return true;
     } catch (err: any) {
       setError(err.message);
       console.error('Update failed:', err);
+      return false;
     } finally {
       setIsLoading(false);
     }
-  }, [editor, fetchDocuments]);
+  }, [fetchDocuments]);
 
   const deleteDocument = useCallback(async (id: string) => {
     setIsLoading(true);
@@ -131,49 +125,30 @@ export function useDocument() {
       });
       if (!res.ok) throw new Error('Failed to delete document');
       await fetchDocuments();
-      if (editor.documentId === id) {
-        editor.reset();
-        editor.setDocumentId(null);
-      }
     } catch (err: any) {
       setError(err.message);
       console.error('Delete failed:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [editor, fetchDocuments]);
+  }, [fetchDocuments]);
 
-  // ✅ Enhanced loadDocument
+  // ✅ loadDocument is just a passthrough — no editor coupling!
+  // Caller (EditorUI) handles state update
   const loadDocument = useCallback((doc: SavedDocument) => {
-    // Load core data into editor
-    editor.loadDocument(doc.id, {
-      originalText: doc.original_text,
-      editedText: doc.edited_text,
-      level: doc.level,
-      model: doc.model,
-      customInstruction: doc.custom_instruction,
-    });
-
-    // ✅ Switch to 'tracked' view — ensure useEditor exposes setViewMode
-    if (typeof editor.setViewMode === 'function') {
-      editor.setViewMode('tracked');
-    }
-
-    // ✅ Optional: trigger re-render if needed (depends on implementation)
-    // If setInputText forces diff recalculation:
-    if (typeof editor.setInputText === 'function') {
-      editor.setInputText(doc.original_text);
-    }
-  }, [editor]);
+    // This function now does nothing but can be used for consistency
+    // Or remove it entirely and access doc directly in EditorUI
+    return doc;
+  }, []);
 
   return {
     documents,
     isLoading,
     error,
-    saveDocument,       // ✅ now accepts optional name
+    saveDocument,
     saveProgress,
     deleteDocument,
-    loadDocument,       // ✅ now switches to tracked view
+    loadDocument,
     fetchDocuments,
   };
 }
