@@ -138,7 +138,7 @@ export function EditorUI() {
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Paste your text here..."
           rows={8}
-          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black"
+          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black" // Explicitly set text color to black
           disabled={isLoading}
         />
       </div>
@@ -167,7 +167,7 @@ export function EditorUI() {
               value={customInstruction}
               onChange={(e) => setCustomInstruction(e.target.value)}
               placeholder="Enter custom instruction..."
-              className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black"
+              className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black" // Explicitly set text color to black
             />
           )}
         </div>
@@ -177,16 +177,16 @@ export function EditorUI() {
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
+            className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white" // Explicitly set text color to black
             disabled={isLoading}
           >
             {BASE_MODELS.map((model) => (
-              <option key={model.id} value={model.id} className="text-black">
+              <option key={model.id} value={model.id} className="text-black"> // Explicitly set text color to black
                 {model.name}
               </option>
             ))}
           </select>
-          <label className="flex items-center text-sm text-black">
+          <label className="flex items-center text-sm text-black"> {/* Explicitly set text color to black */}
             <input
               type="checkbox"
               checked={isEditorialBoard}
@@ -218,7 +218,7 @@ export function EditorUI() {
               value={documentName}
               onChange={(e) => setDocumentName(e.target.value)}
               placeholder="Document name..."
-              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black"
+              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black" // Explicitly set text color to black
             />
             <div className="flex gap-2">
               <button
@@ -259,7 +259,9 @@ export function EditorUI() {
                         onClick={() => loadDocument(doc)}
                       >
                         <div className="flex justify-between items-start">
-                          <div className="font-medium text-sm">{doc.name}</div>
+                          <div className="font-medium text-sm text-black"> {/* Explicitly set text color to black */}
+                            {doc.name}
+                          </div>
                           <div className="text-xs text-gray-500">{formattedDate}</div>
                         </div>
                         <div className="flex justify-end gap-1 mt-1">
@@ -357,7 +359,7 @@ export function EditorUI() {
           <div
             ref={trackedRef}
             className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm"
-            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap', color: '#000' }}
+            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap', color: '#000' }} // Ensure text color is black
           >
             {viewMode === 'clean' ? (
               editedText || 'Result will appear here...'
