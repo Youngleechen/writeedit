@@ -12,6 +12,20 @@ const BASE_MODELS = [
   { id: 'google/gemini-flash-1.5-8b:free', name: 'Gemini Flash 1.5' },
 ];
 
+// 🧪 Wrapper to log TrackedChangesView props
+function TrackedChangesViewWithLogs(props: any) {
+  useEffect(() => {
+    console.log('[TrackedChangesView] Received props:', {
+      originalTextLength: props.originalText?.length,
+      editedTextLength: props.editedText?.length,
+      originalTextPreview: props.originalText?.substring(0, 100),
+      editedTextPreview: props.editedText?.substring(0, 100),
+    });
+  }, [props.originalText, props.editedText]);
+
+  return <TrackedChangesView {...props} />;
+}
+
 export function EditorUI() {
   const editor = useEditor();
   const docManager = useDocument();
@@ -46,6 +60,7 @@ export function EditorUI() {
     setIsEditorialBoard,
     setViewMode,
     applyEdit,
+    changeCount,
   } = editor;
 
   const [documentName, setDocumentName] = useState('');
@@ -57,7 +72,19 @@ export function EditorUI() {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
       setDocumentName(name);
     }
-  }, [inputText]); // ← removed documentName from deps to avoid overriding user input
+  }, [inputText]);
+
+  // 🔍 LOG: Track key state changes
+  useEffect(() => {
+    console.log('[EditorUI] State updated:', {
+      documentId,
+      inputTextLength: inputText.length,
+      editedTextLength: editedText.length,
+      wordCount,
+      changeCount,
+      viewMode,
+    });
+  }, [documentId, inputText, editedText, wordCount, changeCount, viewMode]);
 
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
     if (!trackedRef.current) return editedText;
@@ -114,9 +141,7 @@ export function EditorUI() {
       alert('No valid content to save. Please run “Edit” first.');
       return;
     }
-    // ✅ Pass documentName to saveDocument
     await saveDocument(final, original, documentName);
-    // ✅ Clear name input after successful save
     setDocumentName('');
   };
 
@@ -130,8 +155,20 @@ export function EditorUI() {
     await saveProgress(final, original);
   };
 
+  // 🔍 Enhanced document click handler with logging
+  const handleDocumentClick = (doc: SavedDocument) => {
+    console.log('[EditorUI] Document clicked:', {
+      id: doc.id,
+      name: doc.name,
+      originalTextLength: doc.original_text.length,
+      editedTextLength: doc.edited_text.length,
+      originalPreview: doc.original_text.substring(0, 100),
+      editedPreview: doc.edited_text.substring(0, 100),
+    });
+    loadDocument(doc);
+  };
+
   return (
-    // ✅ WHITE BACKGROUND + BLACK TEXT FOR ENTIRE EDITOR
     <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6 bg-white text-black min-h-screen">
       <div>
         <div className="flex justify-between items-center mb-2">
@@ -261,7 +298,7 @@ export function EditorUI() {
                             ? 'border-green-500 bg-green-50'
                             : 'border-gray-300 hover:bg-gray-100'
                         }`}
-                        onClick={() => loadDocument(doc)}
+                        onClick={() => handleDocumentClick(doc)} // ← logged version
                       >
                         <div className="flex justify-between items-start">
                           <div className="font-medium text-sm text-black">{doc.name}</div>
@@ -271,7 +308,7 @@ export function EditorUI() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              loadDocument(doc);
+                              handleDocumentClick(doc);
                             }}
                             className="text-xs text-blue-600"
                           >
@@ -355,7 +392,7 @@ export function EditorUI() {
               }`}
               onClick={() => setViewMode('tracked')}
             >
-              Tracked Changes ({editor.changeCount} change{editor.changeCount !== 1 ? 's' : ''})
+              Tracked Changes ({changeCount} change{changeCount !== 1 ? 's' : ''})
             </button>
           </div>
 
@@ -367,8 +404,7 @@ export function EditorUI() {
             {viewMode === 'clean' ? (
               editedText || 'Result will appear here...'
             ) : (
-              // ✅ KEY TO FORCE RE-RENDER PER DOCUMENT
-              <TrackedChangesView
+              <TrackedChangesViewWithLogs
                 key={documentId || 'new'}
                 originalText={inputText}
                 editedText={editedText}
