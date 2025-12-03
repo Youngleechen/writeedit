@@ -12,18 +12,35 @@ const BASE_MODELS = [
   { id: 'google/gemini-flash-1.5-8b:free', name: 'Gemini Flash 1.5' },
 ];
 
-// 🧪 Wrapper to log TrackedChangesView props
-function TrackedChangesViewWithLogs(props: any) {
+// 🔍 Wrapper to log what TrackedChangesView receives
+function TrackedChangesViewWithLogs({
+  originalText,
+  editedText,
+  onAcceptChange,
+  onRejectChange,
+}: {
+  originalText: string;
+  editedText: string;
+  onAcceptChange: () => void;
+  onRejectChange: () => void;
+}) {
   useEffect(() => {
-    console.log('[TrackedChangesView] Received props:', {
-      originalTextLength: props.originalText?.length,
-      editedTextLength: props.editedText?.length,
-      originalTextPreview: props.originalText?.substring(0, 100),
-      editedTextPreview: props.editedText?.substring(0, 100),
+    console.log('[TrackedChangesView] Props updated:', {
+      originalTextLength: originalText?.length || 0,
+      editedTextLength: editedText?.length || 0,
+      originalPreview: originalText?.substring(0, 60) || '',
+      editedPreview: editedText?.substring(0, 60) || '',
     });
-  }, [props.originalText, props.editedText]);
+  }, [originalText, editedText]);
 
-  return <TrackedChangesView {...props} />;
+  return (
+    <TrackedChangesView
+      originalText={originalText}
+      editedText={editedText}
+      onAcceptChange={onAcceptChange}
+      onRejectChange={onRejectChange}
+    />
+  );
 }
 
 export function EditorUI() {
@@ -53,6 +70,7 @@ export function EditorUI() {
     isEditorialBoard,
     wordCount,
     documentId,
+    changeCount,
     setInputText,
     setEditLevel,
     setCustomInstruction,
@@ -60,13 +78,12 @@ export function EditorUI() {
     setIsEditorialBoard,
     setViewMode,
     applyEdit,
-    changeCount,
   } = editor;
 
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(true);
 
-  // ✅ Auto-generate name ONLY if user hasn't typed anything
+  // ✅ Auto-generate name only if user hasn't typed anything
   useEffect(() => {
     if (!documentName.trim() && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
@@ -74,17 +91,18 @@ export function EditorUI() {
     }
   }, [inputText]);
 
-  // 🔍 LOG: Track key state changes
+  // 🔍 LOG: Track critical state changes
   useEffect(() => {
-    console.log('[EditorUI] State updated:', {
+    console.log('[EditorUI] 📡 State updated:', {
       documentId,
       inputTextLength: inputText.length,
       editedTextLength: editedText.length,
       wordCount,
       changeCount,
       viewMode,
+      isLoading,
     });
-  }, [documentId, inputText, editedText, wordCount, changeCount, viewMode]);
+  }, [documentId, inputText, editedText, wordCount, changeCount, viewMode, isLoading]);
 
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
     if (!trackedRef.current) return editedText;
@@ -108,23 +126,30 @@ export function EditorUI() {
 
   const handleCopy = async () => {
     const textToCopy = extractCleanTextFromTrackedDOM();
-    if (!textToCopy.trim()) return;
+    if (!textToCopy.trim()) {
+      console.warn('[EditorUI] Copy skipped: no text to copy');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(textToCopy);
       alert('✅ Copied!');
     } catch (err) {
+      console.error('[EditorUI] Copy failed:', err);
       alert('Failed to copy.');
     }
   };
 
   const handleDownload = () => {
     const textToDownload = extractCleanTextFromTrackedDOM();
-    if (!textToDownload.trim()) return;
+    if (!textToDownload.trim()) {
+      console.warn('[EditorUI] Download skipped: no text to download');
+      return;
+    }
     const blob = new Blob([textToDownload], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `edited-document-${new Date().toISOString().slice(0,10)}.txt`;
+    a.download = `edited-document-${new Date().toISOString().slice(0, 10)}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -155,15 +180,15 @@ export function EditorUI() {
     await saveProgress(final, original);
   };
 
-  // 🔍 Enhanced document click handler with logging
+  // 🔍 LOG: Document click handler
   const handleDocumentClick = (doc: SavedDocument) => {
-    console.log('[EditorUI] Document clicked:', {
+    console.log('[EditorUI] 🖱️ Document clicked:', {
       id: doc.id,
       name: doc.name,
       originalTextLength: doc.original_text.length,
       editedTextLength: doc.edited_text.length,
-      originalPreview: doc.original_text.substring(0, 100),
-      editedPreview: doc.edited_text.substring(0, 100),
+      originalPreview: doc.original_text.substring(0, 60),
+      editedPreview: doc.edited_text.substring(0, 60),
     });
     loadDocument(doc);
   };
@@ -298,7 +323,7 @@ export function EditorUI() {
                             ? 'border-green-500 bg-green-50'
                             : 'border-gray-300 hover:bg-gray-100'
                         }`}
-                        onClick={() => handleDocumentClick(doc)} // ← logged version
+                        onClick={() => handleDocumentClick(doc)}
                       >
                         <div className="flex justify-between items-start">
                           <div className="font-medium text-sm text-black">{doc.name}</div>
