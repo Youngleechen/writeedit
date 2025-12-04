@@ -69,7 +69,7 @@ export default function BlogPage() {
 
       try {
         // Fetch published posts
-        const { data: pubData, error: pubError } = await supabase
+        const {  data: pubData, error: pubError } = await supabase
           .from('blog_posts')
           .select('*')
           .eq('published', true)
@@ -80,7 +80,7 @@ export default function BlogPage() {
 
         // Fetch drafts if logged in
         if (currentUser) {
-          const { data: draftData, error: draftError } = await supabase
+          const {  data: draftData, error: draftError } = await supabase
             .from('blog_posts')
             .select('*')
             .eq('user_id', currentUser)
@@ -109,7 +109,7 @@ export default function BlogPage() {
     }
 
     const loadPost = async () => {
-      const { data: postData, error } = await supabase
+      const {  data: postData, error } = await supabase
         .from('blog_posts')
         .select('*')
         .eq('id', postId)
@@ -150,7 +150,7 @@ export default function BlogPage() {
 
     try {
       // Fetch image URL first
-      const { data: postData, error: fetchError } = await supabase
+      const {  data: postData, error: fetchError } = await supabase
         .from('blog_posts')
         .select('image_url')
         .eq('id', id)
