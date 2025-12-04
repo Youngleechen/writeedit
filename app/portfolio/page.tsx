@@ -1,6 +1,6 @@
-// pages/portfolio.tsx
+'use client';
+
 import { useState, useEffect, useRef } from 'react';
-import { NextPage } from 'next';
 import { createClient } from '@supabase/supabase-js';
 
 // Define types
@@ -29,19 +29,19 @@ interface FormData {
   logo_url?: File | string | null;
 }
 
-// Initialize Supabase (client-side)
+// Initialize Supabase (client-side only)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// Helper: get user ID
+// Helper: get current user ID
 const getCurrentUserId = async (): Promise<string | null> => {
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id || null;
 };
 
-// Portfolio CRUD
+// === Portfolio CRUD ===
 async function createPortfolioItem({
   title,
   description,
@@ -84,7 +84,7 @@ async function deletePortfolioItem(id: string) {
   if (error) throw error;
 }
 
-// Trusted Clients CRUD
+// === Trusted Clients CRUD ===
 async function createTrustedClient({ name, logo_url }: { name: string; logo_url: string }) {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Authentication required');
@@ -94,10 +94,7 @@ async function createTrustedClient({ name, logo_url }: { name: string; logo_url:
   if (error) throw error;
 }
 
-async function updateTrustedClient(
-  id: string,
-  { name, logo_url }: { name: string; logo_url: string }
-) {
+async function updateTrustedClient(id: string, { name, logo_url }: { name: string; logo_url: string }) {
   const { error } = await supabase
     .from('trusted_clients')
     .update({ name, logo_url })
@@ -110,7 +107,7 @@ async function deleteTrustedClient(id: string) {
   if (error) throw error;
 }
 
-// Fetch data
+// === Fetch public data ===
 async function getAllPublicPortfolioItems(): Promise<PortfolioItem[]> {
   const { data, error } = await supabase
     .from('portfolio_items')
@@ -129,7 +126,7 @@ async function getAllTrustedClients(): Promise<TrustedClient[]> {
   return data;
 }
 
-// Utils
+// === Utils ===
 function getOrgInitials(org: string): string {
   if (!org) return 'X';
   return org
@@ -140,7 +137,7 @@ function getOrgInitials(org: string): string {
     .padEnd(2, org[0]?.toUpperCase() || 'X');
 }
 
-// Image upload
+// === Image upload ===
 async function uploadPortfolioImage(file: File): Promise<string> {
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Not authenticated');
@@ -167,12 +164,12 @@ async function uploadClientImage(file: File): Promise<string> {
   return data.publicUrl;
 }
 
-// Delete image from storage
 async function deleteImageFromStorage(path: string) {
   await supabase.storage.from('portfolio-images').remove([path]);
 }
 
-const PortfolioPage: NextPage = () => {
+// === Main Component ===
+export default function PortfolioPage() {
   const [projects, setProjects] = useState<PortfolioItem[]>([]);
   const [clients, setClients] = useState<TrustedClient[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -185,10 +182,9 @@ const PortfolioPage: NextPage = () => {
     'addProject' | 'editProject' | 'addClient' | 'editClient' | null
   >(null);
   const [modalData, setModalData] = useState<FormData>({});
-
   const selectedItemRef = useRef<{ id: string; data: any } | null>(null);
 
-  // Fetch data
+  // Fetch data on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -211,16 +207,11 @@ const PortfolioPage: NextPage = () => {
     fetchData();
   }, []);
 
-  // Modal handlers
   const openModal = (
     mode: 'addProject' | 'editProject' | 'addClient' | 'editClient',
     item?: any
   ) => {
-    if (item) {
-      selectedItemRef.current = { id: item.id, data: item };
-    } else {
-      selectedItemRef.current = null;
-    }
+    selectedItemRef.current = item ? { id: item.id, data: item } : null;
 
     if (mode === 'editProject' && item) {
       setModalData({
@@ -344,7 +335,7 @@ const PortfolioPage: NextPage = () => {
 
   if (loading) {
     return (
-      <div className="portfolio-content">
+      <div className="portfolio-content" style={{ marginTop: '2rem', textAlign: 'center' }}>
         <div className="loading">Loading portfolio…</div>
       </div>
     );
@@ -352,25 +343,21 @@ const PortfolioPage: NextPage = () => {
 
   if (error) {
     return (
-      <div className="portfolio-content">
+      <div className="portfolio-content" style={{ marginTop: '2rem', textAlign: 'center' }}>
         <div className="error">Failed to load portfolio: {error}</div>
       </div>
     );
   }
 
   return (
-    <div className="portfolio-content" style={{ marginTop: '1.5rem' }}>
+    <div className="portfolio-content">
       {/* Trusted By Banner (Public) */}
       {clients.length > 0 && (
         <div className="credibility-banner">
           <h3>Trusted By</h3>
           <div className="org-logos">
             {clients.map(client => (
-              <div
-                key={client.id}
-                className="org-badge"
-                title={client.name}
-              >
+              <div key={client.id} className="org-badge" title={client.name}>
                 {client.logo_url ? (
                   <img
                     src={client.logo_url}
@@ -408,13 +395,9 @@ const PortfolioPage: NextPage = () => {
           ) : (
             <div className="trusted-clients-grid">
               {clients.map(client => (
-                <div key={client.id} className="client-card" data-id={client.id}>
+                <div key={client.id} className="client-card">
                   {client.logo_url ? (
-                    <img
-                      src={client.logo_url}
-                      alt={client.name}
-                      className="client-logo"
-                    />
+                    <img src={client.logo_url} alt={client.name} className="client-logo" />
                   ) : (
                     <div className="client-logo">{getOrgInitials(client.name)}</div>
                   )}
@@ -445,11 +428,7 @@ const PortfolioPage: NextPage = () => {
         <div className="empty-state">
           <p>✨ No projects published yet.</p>
           {currentUserId && (
-            <button
-              className="btn primary"
-              style={{ marginTop: '1rem' }}
-              onClick={() => openModal('addProject')}
-            >
+            <button className="btn primary" onClick={() => openModal('addProject')}>
               + Add Project
             </button>
           )}
@@ -460,7 +439,7 @@ const PortfolioPage: NextPage = () => {
             {projects.map(item => {
               const isOwner = currentUserId === item.user_id;
               return (
-                <div key={item.id} className="project-card" data-id={item.id}>
+                <div key={item.id} className="project-card">
                   <h3>{item.title}</h3>
                   <p>{item.description || <em>No description</em>}</p>
                   {item.image_url && (
@@ -494,9 +473,13 @@ const PortfolioPage: NextPage = () => {
           </div>
           {currentUserId && (
             <button
-              id="add-project-btn"
               className="btn primary"
-              style={{ marginTop: '1.5rem', display: 'block', marginLeft: 'auto', marginRight: 'auto' }}
+              style={{
+                marginTop: '1.5rem',
+                display: 'block',
+                marginLeft: 'auto',
+                marginRight: 'auto',
+              }}
               onClick={() => openModal('addProject')}
             >
               + Add Project
@@ -547,11 +530,7 @@ const PortfolioPage: NextPage = () => {
                     <label>Project Image (optional)</label>
                     <div className="image-upload-area">
                       {typeof modalData.image_url === 'string' && modalData.image_url && (
-                        <img
-                          src={modalData.image_url}
-                          alt="Preview"
-                          className="preview-image"
-                        />
+                        <img src={modalData.image_url} alt="Preview" className="preview-image" />
                       )}
                       <input
                         type="file"
@@ -587,11 +566,7 @@ const PortfolioPage: NextPage = () => {
                     <label>Logo Image (optional)</label>
                     <div className="image-upload-area">
                       {typeof modalData.logo_url === 'string' && modalData.logo_url && (
-                        <img
-                          src={modalData.logo_url}
-                          alt="Preview"
-                          className="preview-image"
-                        />
+                        <img src={modalData.logo_url} alt="Preview" className="preview-image" />
                       )}
                       <input
                         type="file"
@@ -1020,6 +995,4 @@ const PortfolioPage: NextPage = () => {
       `}</style>
     </div>
   );
-};
-
-export default PortfolioPage;
+}
