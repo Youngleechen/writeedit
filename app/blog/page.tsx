@@ -136,7 +136,6 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
   // --- Fixed: Re-fetch user ID before database operations ---
   const savePost = async (data: { title: string; content: string; published: boolean; imageFile?: File }) => {
     try {
-      // Critical fix: Re-fetch current user ID immediately before operation
       const userId = await getCurrentUserId();
       if (!userId) throw new Error('Not authenticated');
 
@@ -155,12 +154,12 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
             published: data.published,
           })
           .eq('id', editPostData.id)
-          .eq('user_id', userId); // Use fresh user ID
+          .eq('user_id', userId);
       } else {
         await supabase
           .from('blog_posts')
           .insert({
-            user_id: userId, // Use fresh user ID
+            user_id: userId,
             title: data.title,
             content: data.content,
             image_url: imageUrl,
@@ -182,7 +181,6 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this post permanently?')) return;
     try {
-      // Critical fix: Re-fetch current user ID
       const userId = await getCurrentUserId();
       if (!userId) {
         alert('Authentication required');
@@ -216,10 +214,18 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
     }
   };
 
-  // --- AI Generation ---
+  // --- AI Generation WITH LOGGING & TRIMMED INPUT ---
   const generateWithAI = async () => {
-    if (!aiPrompt.trim()) {
-      setAiStatus({ type: 'error', msg: 'Please enter a topic.' });
+    // 🔍 DEBUG LOG
+    console.log('Raw aiPrompt:', JSON.stringify(aiPrompt));
+    const trimmedPrompt = aiPrompt.trim();
+    console.log('Trimmed aiPrompt:', JSON.stringify(trimmedPrompt));
+
+    if (!trimmedPrompt) {
+      setAiStatus({
+        type: 'error',
+        msg: 'Please enter a topic. Whitespace-only input is not allowed.',
+      });
       return;
     }
 
@@ -231,7 +237,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          instruction: aiPrompt,
+          instruction: trimmedPrompt, // ✅ Use trimmed
           model: 'x-ai/grok-4.1-fast:free',
           editLevel: 'generate',
         }),
@@ -247,10 +253,15 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
         throw new Error('Invalid AI response');
       }
 
-      setAiGenerated({ title: generatedPost.title.trim(), content: generatedPost.content.trim() });
+      setAiGenerated({
+        title: generatedPost.title.trim(),
+        content: generatedPost.content.trim(),
+      });
       setAiStatus({ type: 'success', msg: '✅ Generation successful! Review below.' });
     } catch (err: any) {
-      setAiStatus({ type: 'error', msg: `❌ ${err.message}` });
+      const msg = `❌ ${err.message || 'Unknown error'}`;
+      console.error('AI Generation Error:', err);
+      setAiStatus({ type: 'error', msg });
     } finally {
       setIsGenerating(false);
     }
@@ -470,7 +481,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
                   name="title"
                   type="text"
                   defaultValue={editPostData?.title || ''}
-                  className="w-full p-2 border border-gray-300 rounded"
+                  className="w-full p-2 border border-gray-300 rounded text-black bg-white"
                   required
                 />
               </div>
@@ -480,7 +491,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
                   name="content"
                   defaultValue={editPostData?.content || ''}
                   rows={10}
-                  className="w-full p-2 border border-gray-300 rounded font-mono"
+                  className="w-full p-2 border border-gray-300 rounded font-mono text-black bg-white"
                   required
                 />
               </div>
@@ -550,11 +561,17 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
             <p className="text-gray-600 text-sm mb-4">
               Be specific for better results (e.g., "Beginner's guide to sourdough bread")
             </p>
+            {/* ✅ FIXED: Added text-black, bg-white, placeholder contrast */}
             <textarea
               value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setAiPrompt(val);
+                // Optional: clear status when user types
+                if (aiStatus?.type === 'error') setAiStatus(null);
+              }}
               placeholder="What would you like to write about?"
-              className="w-full p-3 border border-gray-300 rounded-lg mb-4 h-24 resize-none"
+              className="w-full p-3 border border-gray-300 rounded-lg mb-4 h-24 resize-none text-black bg-white placeholder:text-gray-400"
             />
             <button
               onClick={generateWithAI}
