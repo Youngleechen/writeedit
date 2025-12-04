@@ -1,9 +1,6 @@
 // app/api/vision/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
-export const maxDuration = 60; // Optional: increase if needed
-export const runtime = 'edge'; // Optional: can remove if not using Edge
-
 export async function POST(req: NextRequest) {
   const { imageBase64, prompt } = await req.json();
 
@@ -52,21 +49,49 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    const data = await response.json();
-
+    // 👇 NEW: Check if response is OK before parsing as JSON
     if (!response.ok) {
-      console.error('Vision API error:', data);
+      const errorText = await response.text(); // Get raw text if JSON fails
+      console.error('OpenRouter error:', errorText);
       return NextResponse.json(
         {
-          error: 'Vision analysis failed',
-          details: data.error?.message || 'Unknown error',
+          error: 'OpenRouter API error',
+          details: errorText || 'Unknown error',
+          status: response.status,
         },
         { status: response.status }
       );
     }
 
-    const answer = data.choices?.[0]?.message?.content?.trim() || 'No response.';
+    let data;
+    try {
+      data = await response.json(); // ✅ Now safe to parse
+    } catch (parseError) {
+      console.error('Failed to parse JSON:', parseError);
+      return NextResponse.json(
+        {
+          error: 'Invalid response from OpenRouter',
+          details: 'Response was not valid JSON',
+          raw: await response.text(), // Include raw response for debugging
+        },
+        { status: 502 }
+      );
+    }
+
+    // Validate structure
+    if (!data.choices?.[0]?.message?.content) {
+      return NextResponse.json(
+        {
+          error: 'Unexpected response format',
+          details: 'No answer found in AI response',
+        },
+        { status: 500 }
+      );
+    }
+
+    const answer = data.choices[0].message.content.trim();
     return NextResponse.json({ answer });
+
   } catch (err: any) {
     console.error('Server error:', err);
     return NextResponse.json(
