@@ -343,3 +343,41 @@ body {
     font-size: 0.7em;
   }
 }
+
+/* === WRITING CANVAS STYLING === */
+.writing-canvas {
+  /* Ensure strong contrast */
+  color: #111; /* Dark charcoal, not pure black for better reading */
+  caret-color: #1976d2; /* Blue cursor for visibility */
+
+  /* Make sure font is bold enough */
+  font-weight: 400; /* or 500 if you want slightly heavier */
+  line-height: 1.6;
+  font-size: 1.1em;
+
+  /* Prevent faint placeholder text */
+  &::before {
+    color: #888; /* Slightly darker than default gray */
+    font-style: italic;
+  }
+
+  /* Optional: add subtle background to make text pop */
+  background: #fff;
+  padding: 24px 16px;
+  border: none;
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* === TITLE STYLING (for comparison) === */
+#writing-canvas {
+  font-family: var(--font-spectral), serif;
+}
+#draft-title {
+  font-family: var(--font-spectral), serif;
+  color: #222; /* Slightly lighter than body text */
+  font-weight: 600; /* Bold for headings */
+}
