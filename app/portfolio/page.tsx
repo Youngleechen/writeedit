@@ -185,28 +185,28 @@ export default function PortfolioPage() {
   const selectedItemRef = useRef<{ id: string; data: any } | null>(null);
 
   // Fetch data on mount
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const userId = await getCurrentUserId();
-        setCurrentUserId(userId);
+ useEffect(() => {
+  const fetchData = async () => {
+    try {
+      const userId = await getCurrentUserId();
+      console.log('Current user ID:', userId); // 👈 DEBUG
+      setCurrentUserId(userId);
 
-        const [proj, cl] = await Promise.all([
-          getAllPublicPortfolioItems(),
-          getAllTrustedClients(),
-        ]);
-        setProjects(proj);
-        setClients(cl);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load portfolio');
-      } finally {
-        setLoading(false);
-      }
-    };
+      const [proj, cl] = await Promise.all([
+        getAllPublicPortfolioItems(),
+        getAllTrustedClients(),
+      ]);
+      setProjects(proj);
+      setClients(cl);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load portfolio');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchData();
-  }, []);
-
+  fetchData();
+}, []);
   const openModal = (
     mode: 'addProject' | 'editProject' | 'addClient' | 'editClient',
     item?: any
