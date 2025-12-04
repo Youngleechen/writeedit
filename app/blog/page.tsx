@@ -136,6 +136,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
   // --- Fixed: Re-fetch user ID before database operations ---
   const savePost = async (data: { title: string; content: string; published: boolean; imageFile?: File }) => {
     try {
+      // Critical fix: Re-fetch current user ID immediately before operation
       const userId = await getCurrentUserId();
       if (!userId) throw new Error('Not authenticated');
 
@@ -154,12 +155,12 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
             published: data.published,
           })
           .eq('id', editPostData.id)
-          .eq('user_id', userId);
+          .eq('user_id', userId); // Use fresh user ID
       } else {
         await supabase
           .from('blog_posts')
           .insert({
-            user_id: userId,
+            user_id: userId, // Use fresh user ID
             title: data.title,
             content: data.content,
             image_url: imageUrl,
@@ -181,6 +182,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this post permanently?')) return;
     try {
+      // Critical fix: Re-fetch current user ID
       const userId = await getCurrentUserId();
       if (!userId) {
         alert('Authentication required');
@@ -214,58 +216,59 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
     }
   };
 
-  // --- AI Generation WITH LOGGING & TRIMMED INPUT ---
   const generateWithAI = async () => {
-    // 🔍 DEBUG LOG
-    console.log('Raw aiPrompt:', JSON.stringify(aiPrompt));
-    const trimmedPrompt = aiPrompt.trim();
-    console.log('Trimmed aiPrompt:', JSON.stringify(trimmedPrompt));
+  const trimmedPrompt = aiPrompt.trim();
+  if (!trimmedPrompt) {
+    setAiStatus({ type: 'error', msg: 'Please enter a topic.' });
+    return;
+  }
 
-    if (!trimmedPrompt) {
-      setAiStatus({
-        type: 'error',
-        msg: 'Please enter a topic. Whitespace-only input is not allowed.',
-      });
-      return;
+  setIsGenerating(true);
+  setAiStatus({ type: 'info', msg: 'Generating your blog post...' });
+
+  try {
+    // ✅ Send BOTH input AND instruction
+    const res = await fetch('/api/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: trimmedPrompt,                          // ← REQUIRED by backend
+        instruction: `Write a complete, well-structured blog post about: "${trimmedPrompt}"`, // ← guidance
+        model: 'x-ai/grok-4.1-fast:free',
+        editLevel: 'custom',                           // ← 'generate' is not a valid level
+        useEditorialBoard: false,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Generation failed');
     }
 
-    setIsGenerating(true);
-    setAiStatus({ type: 'info', msg: 'Generating your blog post...' });
+    const { editedText } = await res.json();
 
-    try {
-      const res = await fetch('/api/edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instruction: trimmedPrompt, // ✅ Use trimmed
-          model: 'x-ai/grok-4.1-fast:free',
-          editLevel: 'generate',
-        }),
-      });
+    // ❗ The backend returns editedText, but for generation,
+    // we need to extract title + content — currently it returns plain text.
+    // So we’ll assume the AI returns: "Title\n\nParagraph1\n\nParagraph2..."
+    const [title, ...contentParts] = editedText.split('\n\n');
+    const content = contentParts.join('\n\n').trim();
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Generation failed');
-      }
-
-      const { generatedPost } = await res.json();
-      if (!generatedPost?.title || !generatedPost?.content) {
-        throw new Error('Invalid AI response');
-      }
-
-      setAiGenerated({
-        title: generatedPost.title.trim(),
-        content: generatedPost.content.trim(),
-      });
-      setAiStatus({ type: 'success', msg: '✅ Generation successful! Review below.' });
-    } catch (err: any) {
-      const msg = `❌ ${err.message || 'Unknown error'}`;
-      console.error('AI Generation Error:', err);
-      setAiStatus({ type: 'error', msg });
-    } finally {
-      setIsGenerating(false);
+    if (!title.trim() || !content.trim()) {
+      throw new Error('AI response missing title or content');
     }
-  };
+
+    setAiGenerated({
+      title: title.trim(),
+      content: content.trim(),
+    });
+    setAiStatus({ type: 'success', msg: '✅ Generation successful!' });
+  } catch (err: any) {
+    console.error('AI Generation Error:', err);
+    setAiStatus({ type: 'error', msg: `❌ ${err.message}` });
+  } finally {
+    setIsGenerating(false);
+  }
+};
 
   // --- Helpers ---
   const openEditModal = (post?: Partial<BlogPost> | null) => {
@@ -481,7 +484,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
                   name="title"
                   type="text"
                   defaultValue={editPostData?.title || ''}
-                  className="w-full p-2 border border-gray-300 rounded text-black bg-white"
+                  className="w-full p-2 border border-gray-300 rounded"
                   required
                 />
               </div>
@@ -491,7 +494,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
                   name="content"
                   defaultValue={editPostData?.content || ''}
                   rows={10}
-                  className="w-full p-2 border border-gray-300 rounded font-mono text-black bg-white"
+                  className="w-full p-2 border border-gray-300 rounded font-mono"
                   required
                 />
               </div>
@@ -561,17 +564,11 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
             <p className="text-gray-600 text-sm mb-4">
               Be specific for better results (e.g., "Beginner's guide to sourdough bread")
             </p>
-            {/* ✅ FIXED: Added text-black, bg-white, placeholder contrast */}
             <textarea
               value={aiPrompt}
-              onChange={(e) => {
-                const val = e.target.value;
-                setAiPrompt(val);
-                // Optional: clear status when user types
-                if (aiStatus?.type === 'error') setAiStatus(null);
-              }}
+              onChange={(e) => setAiPrompt(e.target.value)}
               placeholder="What would you like to write about?"
-              className="w-full p-3 border border-gray-300 rounded-lg mb-4 h-24 resize-none text-black bg-white placeholder:text-gray-400"
+              className="w-full p-3 border border-gray-300 rounded-lg mb-4 h-24 resize-none"
             />
             <button
               onClick={generateWithAI}
