@@ -22,11 +22,20 @@ export async function POST(req: NextRequest) {
       useEditorialBoard = false
     } = body;
 
-    if (!input?.trim()) return NextResponse.json({ error: 'Input required' }, { status: 400 });
-    if (!instruction?.trim()) return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
+    // Instruction is always required
+    if (!instruction?.trim()) {
+      return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
+    }
+
+    // Input is only required for editing (not for generation like "Spark")
+    if (editLevel !== 'generate' && !input?.trim()) {
+      return NextResponse.json({ error: 'Input required' }, { status: 400 });
+    }
 
     const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    if (!OPENROUTER_API_KEY) return NextResponse.json({ error: 'Server config error' }, { status: 500 });
+    if (!OPENROUTER_API_KEY) {
+      return NextResponse.json({ error: 'Server config error' }, { status: 500 });
+    }
 
     // Build fallback order: preferred first, then others (no duplicates)
     const modelOrder = [
@@ -40,10 +49,10 @@ export async function POST(req: NextRequest) {
 
     for (const model of modelOrder) {
       try {
-        const wordCount = input.trim().split(/\s+/).length;
+        const wordCount = input?.trim().split(/\s+/).length || 0;
         if (wordCount >= 1000) {
           finalText = await processChunkedEditWithModel(
-            input,
+            input || '',
             instruction,
             model,
             editLevel,
@@ -52,9 +61,9 @@ export async function POST(req: NextRequest) {
           );
         } else {
           if (useEditorialBoard) {
-            finalText = await runSelfRefinementLoop(input, instruction, model, OPENROUTER_API_KEY);
+            finalText = await runSelfRefinementLoop(input || '', instruction, model, OPENROUTER_API_KEY);
           } else {
-            finalText = await callModel(input, instruction, model, editLevel, OPENROUTER_API_KEY);
+            finalText = await callModel(input || '', instruction, model, editLevel, OPENROUTER_API_KEY);
           }
         }
         usedModel = model;
@@ -75,7 +84,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { html: trackedHtml, changes } = generateTrackedChanges(input, finalText);
+    const { html: trackedHtml, changes } = generateTrackedChanges(input || '', finalText);
 
     return NextResponse.json({
       editedText: finalText,
@@ -180,7 +189,7 @@ function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;'); // ← Fixed: no space before /g
+    .replace(/>/g, '&gt;');
 }
 
 function generateTrackedChanges(original: string, edited: string): { html: string; changes: number } {
