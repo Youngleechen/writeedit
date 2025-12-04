@@ -13,7 +13,7 @@ const supabase = createClient(
 export default function AuthPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const mode = searchParams.get('mode') || 'signin'; // fallback to signin
+  const mode = searchParams.get('mode') || 'signin'; // 'signin' or 'signup'
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,18 +25,22 @@ export default function AuthPage() {
     const checkSession = async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
-        router.push('/portfolio'); // or your dashboard
+        router.push('/portfolio');
       }
     };
     checkSession();
   }, [router]);
 
-  const validateForm = () => {
+  const validate = () => {
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
       setMessage({ type: 'error', text: 'Please enter a valid email.' });
       return false;
     }
-    if (mode === 'signup' && (!password || password.length < 6)) {
+    if (!password) {
+      setMessage({ type: 'error', text: 'Password is required.' });
+      return false;
+    }
+    if (mode === 'signup' && password.length < 6) {
       setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
       return false;
     }
@@ -47,33 +51,29 @@ export default function AuthPage() {
     e.preventDefault();
     setMessage(null);
 
-    if (!validateForm()) return;
+    if (!validate()) return;
 
     setLoading(true);
 
     try {
-      let result;
       if (mode === 'signup') {
-        result = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/confirm`,
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
         });
-        if (result.error) throw result.error;
+        if (error) throw error;
         setMessage({
           type: 'success',
-          text: 'Check your email for a confirmation link.',
+          text: 'Account created! Check your email for confirmation.',
         });
       } else {
-        // Sign in with password
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        // Sign in with email + password
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        if (data.user) {
-          router.push('/portfolio');
-          return;
-        }
+        router.push('/portfolio');
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Authentication failed.' });
@@ -82,24 +82,16 @@ export default function AuthPage() {
     }
   };
 
-  const handleOAuth = (provider: 'github' | 'google') => {
-    setLoading(true);
-    supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-  };
-
   const isSignIn = mode === 'signin';
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>{isSignIn ? 'Welcome Back' : 'Create Account'}</h1>
+        <h1 style={styles.title}>{isSignIn ? 'Sign In' : 'Create Account'}</h1>
         <p style={styles.subtitle}>
-          {isSignIn ? 'Sign in to manage your portfolio' : 'Join to showcase your work'}
+          {isSignIn
+            ? 'Welcome back! Please sign in to continue.'
+            : 'Join to manage your portfolio and content.'}
         </p>
 
         {message && (
@@ -111,50 +103,46 @@ export default function AuthPage() {
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.inputGroup}>
             <label htmlFor="email" style={styles.label}>
-              Email
+              Email address
             </label>
             <input
               id="email"
               type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               style={styles.input}
               disabled={loading}
+              autoComplete="email"
               required
             />
           </div>
 
-          {mode === 'signup' && (
-            <div style={styles.inputGroup}>
-              <label htmlFor="password" style={styles.label}>
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                style={styles.input}
-                disabled={loading}
-                required
-              />
-              <p style={styles.hint}>At least 6 characters</p>
-            </div>
-          )}
-
-          {mode === 'signin' && (
-            <button
-              type="button"
-              onClick={() => {
-                /* Optional: add password reset flow */
-              }}
-              style={styles.forgotPassword}
-            >
-              Forgot password?
-            </button>
-          )}
+          <div style={styles.inputGroup}>
+            <label htmlFor="password" style={styles.label}>
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              style={styles.input}
+              disabled={loading}
+              autoComplete={isSignIn ? 'current-password' : 'new-password'}
+              required
+            />
+            {isSignIn && (
+              <button
+                type="button"
+                onClick={() => alert('Password reset not implemented yet')}
+                style={styles.forgotPassword}
+              >
+                Forgot password?
+              </button>
+            )}
+          </div>
 
           <button
             type="submit"
@@ -168,41 +156,32 @@ export default function AuthPage() {
           </button>
         </form>
 
-        <div style={styles.divider}>
-          <span>or continue with</span>
-        </div>
-
-        <div style={styles.oauthButtons}>
-          <button
-            type="button"
-            onClick={() => handleOAuth('github')}
-            style={styles.oauthButton}
-            disabled={loading}
-          >
-            GitHub
-          </button>
-          <button
-            type="button"
-            onClick={() => handleOAuth('google')}
-            style={styles.oauthButton}
-            disabled={loading}
-          >
-            Google
-          </button>
-        </div>
-
         <div style={styles.footer}>
           {isSignIn ? (
             <>
               Don’t have an account?{' '}
-              <a href="/auth/signup" style={styles.link}>
+              <a
+                href="/auth/signup"
+                style={styles.link}
+                onClick={(e) => {
+                  e.preventDefault();
+                  router.push('/auth/signup');
+                }}
+              >
                 Sign up
               </a>
             </>
           ) : (
             <>
               Already have an account?{' '}
-              <a href="/auth/signin" style={styles.link}>
+              <a
+                href="/auth/signin"
+                style={styles.link}
+                onClick={(e) => {
+                  e.preventDefault();
+                  router.push('/auth/signin');
+                }}
+              >
                 Sign in
               </a>
             </>
@@ -210,14 +189,26 @@ export default function AuthPage() {
         </div>
       </div>
 
-      <style jsx>{`
-        /* Optional: add global reset or use your existing CSS */
+      {/* Optional: Add global styles if needed */}
+      <style jsx global>{`
+        body {
+          margin: 0;
+          padding: 0;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background-color: #f9fafb;
+        }
+        input,
+        button,
+        select,
+        textarea {
+          font-family: inherit;
+        }
       `}</style>
     </div>
   );
 }
 
-// Professional inline styles (replace with Tailwind or CSS modules if preferred)
+// ✨ Professional, visible, accessible styles
 const styles = {
   container: {
     display: 'flex',
@@ -238,15 +229,15 @@ const styles = {
     border: '1px solid #e5e7eb',
   },
   title: {
-    fontSize: '1.875rem',
+    fontSize: '1.875rem', // 30px
     fontWeight: 700,
-    color: '#111827',
+    color: '#111827', // gray-900
     textAlign: 'center' as const,
     marginBottom: '0.5rem',
   },
   subtitle: {
     fontSize: '1rem',
-    color: '#6b7280',
+    color: '#6b7280', // gray-500
     textAlign: 'center' as const,
     marginBottom: '1.5rem',
   },
@@ -258,35 +249,31 @@ const styles = {
   inputGroup: {
     display: 'flex',
     flexDirection: 'column' as const,
+    gap: '0.5rem',
   },
   label: {
-    fontSize: '0.875rem',
+    fontSize: '0.875rem', // 14px
     fontWeight: 600,
-    color: '#374151',
-    marginBottom: '0.5rem',
+    color: '#374151', // gray-700
   },
   input: {
     padding: '0.75rem',
     borderRadius: '8px',
-    border: '1px solid #d1d5db',
+    border: '1px solid #d1d5db', // gray-300
     fontSize: '1rem',
-    transition: 'border-color 0.2s',
-  },
-  hint: {
-    fontSize: '0.75rem',
-    color: '#9ca3af',
-    marginTop: '0.25rem',
+    backgroundColor: 'white',
+    color: '#111827', // DARK TEXT — fixes invisible typing!
+    transition: 'border-color 0.2s, box-shadow 0.2s',
   },
   forgotPassword: {
     alignSelf: 'flex-end',
     background: 'none',
     border: 'none',
-    color: '#3b82f6',
+    color: '#3b82f6', // indigo-500
     fontSize: '0.875rem',
     cursor: 'pointer',
     padding: 0,
-    marginTop: '-0.5rem',
-    marginBottom: '0.25rem',
+    marginTop: '0.25rem',
   },
   button: {
     padding: '0.875rem',
@@ -294,7 +281,7 @@ const styles = {
     fontSize: '1rem',
     fontWeight: 600,
     color: 'white',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#3b82f6', // indigo-500
     border: 'none',
     cursor: 'pointer',
     transition: 'background-color 0.2s',
@@ -319,28 +306,6 @@ const styles = {
     fontSize: '0.875rem',
     marginBottom: '1rem',
   },
-  divider: {
-    display: 'flex',
-    alignItems: 'center',
-    margin: '1.5rem 0',
-    color: '#9ca3af',
-    fontSize: '0.875rem',
-  },
-  oauthButtons: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '1rem',
-  },
-  oauthButton: {
-    padding: '0.75rem',
-    borderRadius: '8px',
-    fontSize: '0.95rem',
-    fontWeight: 600,
-    border: '1px solid #d1d5db',
-    backgroundColor: 'white',
-    cursor: 'pointer',
-    transition: 'background 0.2s',
-  },
   footer: {
     textAlign: 'center' as const,
     marginTop: '1.5rem',
@@ -350,6 +315,7 @@ const styles = {
   link: {
     color: '#3b82f6',
     textDecoration: 'none',
-    fontWeight: 600,
+    fontWeight: 700,
+    cursor: 'pointer',
   },
 };
