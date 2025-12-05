@@ -251,66 +251,48 @@ const App = () => {
       </AnimatePresence>
 
       {/* Hero Section */}
-      <section className="relative h-screen flex items-center justify-center overflow-hidden">
-        <div 
-          className="absolute inset-0 bg-cover bg-center"
-          style={{
-            backgroundImage: `url('https://placehold.co/1920x1080/0f172a/ffffff?text=Premium+Real+Estate')`
-          }}
-        >
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60"></div>
-        </div>
-        
-        <div className="relative z-10 text-center text-white max-w-4xl mx-auto px-4">
-          <motion.h1 
-            className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-          >
-            Find Your <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">Perfect</span> Home
-          </motion.h1>
-          
-          <motion.p 
-            className="text-lg md:text-xl mb-8 text-gray-200 max-w-2xl mx-auto"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-          >
-            Discover luxury properties that match your lifestyle and investment goals with our expert guidance.
-          </motion.p>
-          
-          {/* Search Bar */}
-          <motion.div 
-            className="bg-white/95 backdrop-blur-sm rounded-2xl p-1 max-w-3xl mx-auto shadow-2xl"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
-          >
-            <div className="flex items-center">
-              <Search className="ml-4 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search by location, property type, or price..."
-                className="flex-1 py-4 px-4 outline-none text-gray-700 placeholder-gray-500"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              <button className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold hover:shadow-xl transition-all hover:scale-105">
-                Search
-              </button>
-            </div>
-          </motion.div>
-        </div>
-
-        <motion.div 
-          className="absolute bottom-8 left-1/2 transform -translate-x-1/2"
-          animate={{ y: [0, 10, 0] }}
-          transition={{ duration: 2, repeat: Infinity }}
-        >
-          <ChevronRight className="w-6 h-6 text-white/80 rotate-90" />
-        </motion.div>
-      </section>
+     <section className="relative h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-gray-900 via-black to-indigo-950">
+  <div className="absolute inset-0 bg-black/40"></div>
+  
+  <div className="text-center text-white z-10 max-w-4xl mx-auto px-4">
+    <motion.h1 
+      className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 leading-tight"
+      initial={{ opacity: 0, y: 30 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.8 }}
+    >
+      Find Your <span className="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Perfect</span> Home
+    </motion.h1>
+    
+    <motion.p
+      className="text-xl md:text-2xl font-medium text-gray-300 mb-8"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.2, duration: 0.6 }}
+    >
+      Premium Real Estate
+    </motion.p>
+    
+    <motion.div
+      className="flex items-center justify-center gap-2"
+      initial={{ opacity: 0, y: 30 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.4, duration: 0.6 }}
+    >
+      <div className="relative flex-1 max-w-md">
+        <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+        <input
+          type="text"
+          placeholder="Search by location, property type, or price..."
+          className="w-full py-3 pl-12 pr-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+        />
+      </div>
+      <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg hover:scale-105 transition-all">
+        Search
+      </button>
+    </motion.div>
+  </div>
+</section>
 
       {/* Stats Section */}
       <section className="py-16 bg-white border-b border-gray-100">
