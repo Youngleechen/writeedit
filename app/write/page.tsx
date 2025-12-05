@@ -83,6 +83,8 @@ export default function WritePage() {
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
+  // NEW: Store selected text separately
+  const lastSelectedTextRef = useRef<string | null>(null);
 
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
@@ -118,7 +120,12 @@ export default function WritePage() {
       const range = selection.getRangeAt(0);
       if (canvasRef.current.contains(range.commonAncestorContainer)) {
         currentSelectionRangeRef.current = range.cloneRange();
+        // NEW: Store selected text separately
+        lastSelectedTextRef.current = selection.toString().trim() || null;
       }
+    } else {
+      // Clear stored text if no selection
+      lastSelectedTextRef.current = null;
     }
   };
 
@@ -227,6 +234,7 @@ export default function WritePage() {
       clearTimeout(pendingHistoryCaptureRef.current);
       pendingHistoryCaptureRef.current = null;
     }
+    lastSelectedTextRef.current = null; // Clear stored selection
   };
 
   const shouldCaptureHistory = () => !isApplyingHistory && !isAiOperation;
@@ -738,19 +746,21 @@ export default function WritePage() {
     const canvas = canvasRef.current;
     if (!canvas) return { text: '', hasSelection: false };
 
-    let selectedText = '';
-    let hasSelection = false;
-
-    if (restoreSavedSelection()) {
-      selectedText = window.getSelection()?.toString().trim() || '';
-      hasSelection = selectedText.length > 0;
-    } else {
-      const selection = window.getSelection();
-      selectedText = selection?.toString().trim() || '';
-      hasSelection = selectedText.length > 0;
+    // NEW: Focus canvas first on mobile to preserve selection
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      canvas.focus({ preventScroll: true });
     }
 
-    const fullText = canvas.textContent.trim();
+    let selectedText = lastSelectedTextRef.current || '';
+    const hasSelection = selectedText.length > 0;
+    
+    // Fallback to current selection if stored text is empty
+    if (!hasSelection) {
+      const selection = window.getSelection();
+      selectedText = selection?.toString().trim() || '';
+    }
+
+    const fullText = canvas.textContent?.trim() || '';
     return {
       text: hasSelection ? selectedText : fullText,
       hasSelection: hasSelection && selectedText.length > 0,
@@ -758,6 +768,11 @@ export default function WritePage() {
   };
 
   const handleRewriteSelection = async () => {
+    // NEW: Ensure canvas is focused first on mobile
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
+      canvasRef.current.focus({ preventScroll: true });
+    }
+
     const { text, hasSelection } = getSelectedOrFullText();
     if (!text) {
       showToast('No text to rewrite', 'info');
@@ -817,6 +832,11 @@ export default function WritePage() {
   };
 
   const handleAdjustTone = async () => {
+    // NEW: Ensure canvas is focused first on mobile
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
+      canvasRef.current.focus({ preventScroll: true });
+    }
+
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to adjust tone', 'info');
@@ -870,6 +890,11 @@ export default function WritePage() {
   };
 
   const handleExpandText = async () => {
+    // NEW: Ensure canvas is focused first on mobile
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
+      canvasRef.current.focus({ preventScroll: true });
+    }
+
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to expand', 'info');
@@ -927,6 +952,11 @@ export default function WritePage() {
   };
 
   const handleCondenseText = async () => {
+    // NEW: Ensure canvas is focused first on mobile
+    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
+      canvasRef.current.focus({ preventScroll: true });
+    }
+
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to condense', 'info');
@@ -1063,21 +1093,46 @@ export default function WritePage() {
           </button>
           <div className="ai-controls-group">
             <div className="ai-controls-top">
-              <button className="btn ai-btn" onClick={handleGenerateSpark}>
+              <button 
+                className="btn ai-btn" 
+                onClick={handleGenerateSpark}
+                // NEW: Prevent selection loss on mobile
+                onTouchStart={(e) => e.preventDefault()}
+              >
                 ✨ Spark
               </button>
-              <button className="btn ai-btn" onClick={handleRewriteSelection}>
+              <button 
+                className="btn ai-btn" 
+                onClick={handleRewriteSelection}
+                // NEW: Prevent selection loss on mobile
+                onTouchStart={(e) => e.preventDefault()}
+              >
                 🧠 Rewrite
               </button>
-              <button className="btn ai-btn" onClick={handleAdjustTone}>
+              <button 
+                className="btn ai-btn" 
+                onClick={handleAdjustTone}
+                // NEW: Prevent selection loss on mobile
+                onTouchStart={(e) => e.preventDefault()}
+              >
                 🎭 Tone
               </button>
             </div>
             <div className="ai-controls-bottom">
-              <button className="btn ai-btn" onClick={handleExpandText}>
+              <button 
+                className="btn ai-btn" 
+                onClick={handleExpandText}
+                // NEW: Prevent selection loss on mobile
+                onTouchStart={(e) => e.preventDefault()}
+              >
                 📈 Expand
               </button>
-              <button className="btn ai-btn" onClick={handleCondenseText}>
+              <button 
+                className="btn ai-btn" 
+                onClick={handleCondenseText}
+                // NEW: Prevent selection loss on mobile
+                onTouchStart={(e) => e.preventDefault()}
+              >
                 📉 Condense
               </button>
             </div>
