@@ -251,7 +251,10 @@ const App = () => {
       </AnimatePresence>
 
       {/* Hero Section */}
-     <section className="relative h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-gray-900 via-black to-indigo-950">
+  <section 
+  className="relative h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-gray-900 via-black to-indigo-950"
+  style={{ paddingTop: '120px', paddingBottom: '80px' }}
+>
   <div className="absolute inset-0 bg-black/40"></div>
   
   <div className="text-center text-white z-10 max-w-4xl mx-auto px-4">
@@ -293,7 +296,6 @@ const App = () => {
     </motion.div>
   </div>
 </section>
-
       {/* Stats Section */}
       <section className="py-16 bg-white border-b border-gray-100">
         <div className="container mx-auto px-4">
