@@ -84,7 +84,10 @@ export default function WritePage() {
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
 
-  // --- State ---
+  // 🔥 NEW: Use a ref to store the last valid selection text (survives blur/click)
+  const lastValidSelectionTextRef = useRef<string | null>(null);
+
+  // --- State (keep for UI only, not logic) ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isAiOperation, setIsAiOperation] = useState(false);
@@ -99,8 +102,7 @@ export default function WritePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-  // 🔥 NEW: Persist selected text across interactions
-  const [selectedText, setSelectedText] = useState<string | null>(null);
+  // (Optional) Keep this if you want to show selection UI (e.g., highlight buttons)
   const [hasActiveSelection, setHasActiveSelection] = useState(false);
 
   // --- Toast ---
@@ -114,39 +116,7 @@ export default function WritePage() {
     setAutosaveStatusType(type);
   };
 
-  // --- Selection utils ---
-  const saveCurrentSelection = () => {
-    if (!canvasRef.current) return;
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (canvasRef.current.contains(range.commonAncestorContainer)) {
-        currentSelectionRangeRef.current = range.cloneRange();
-        const text = selection.toString().trim();
-        setSelectedText(text);
-        setHasActiveSelection(text.length > 0);
-      }
-    } else {
-      // No selection
-      setSelectedText(null);
-      setHasActiveSelection(false);
-    }
-  };
-
-  const restoreSavedSelection = (): boolean => {
-    const range = currentSelectionRangeRef.current;
-    if (!range || !canvasRef.current) return false;
-    try {
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      return true;
-    } catch {
-      currentSelectionRangeRef.current = null;
-      return false;
-    }
-  };
-
+  // --- Selection utils (for history) ---
   const getElementPath = (element: Node, root: Node): ElementPathStep[] => {
     if (element === root) return [];
     const path: ElementPathStep[] = [];
@@ -238,9 +208,9 @@ export default function WritePage() {
       clearTimeout(pendingHistoryCaptureRef.current);
       pendingHistoryCaptureRef.current = null;
     }
-    // Also reset selection
-    setSelectedText(null);
-    setHasActiveSelection(false);
+    currentSelectionRangeRef.current = null;
+    // Clear selection ref when starting fresh
+    lastValidSelectionTextRef.current = null;
   };
 
   const shouldCaptureHistory = () => !isApplyingHistory && !isAiOperation;
@@ -324,7 +294,7 @@ export default function WritePage() {
     setWordCount(words);
   };
 
-  // --- Local storage ---
+  // --- Local storage & Supabase (unchanged) ---
   const getLocalDrafts = (): FullDraft[] => {
     const stored = localStorage.getItem('localDrafts');
     return stored ? JSON.parse(stored) : [];
@@ -338,7 +308,6 @@ export default function WritePage() {
     localStorage.setItem('localDrafts', JSON.stringify(drafts));
   };
 
-  // --- Supabase draft persistence ---
   const saveDraftToSupabase = async (content: string, title: string): Promise<string> => {
     const userId = await getCurrentUserId();
     if (!userId) {
@@ -447,7 +416,7 @@ export default function WritePage() {
     );
   };
 
-  // --- Save logic ---
+  // --- Save logic (unchanged) ---
   const manuallySave = async () => {
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
@@ -517,32 +486,28 @@ export default function WritePage() {
     }
   };
 
-const handleInput = () => {
-  setIsDirty(true);
-  updateWordCount();
+  const handleInput = () => {
+    setIsDirty(true);
+    updateWordCount();
 
-  // Delay clearing selection slightly to allow AI buttons to read `selectedText`
-  // before it's wiped out by editing actions.
-  setTimeout(() => {
-    if (!isAiOperation && !isApplyingHistory) {
-      setSelectedText(null);
-      setHasActiveSelection(false);
-      currentSelectionRangeRef.current = null;
+    // Clear selection ref on edit (optional)
+    lastValidSelectionTextRef.current = null;
+    setHasActiveSelection(false);
+    currentSelectionRangeRef.current = null;
+
+    if (currentDraftId) {
+      updateAutosaveStatus('Unsaved changes', 'unsaved');
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(autosave, 2000);
+      captureHistoryState();
+    } else {
+      updateAutosaveStatus('Creating draft…', 'saving');
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(manuallySave, 500);
     }
-  }, 50);
+  };
 
-  if (currentDraftId) {
-    updateAutosaveStatus('Unsaved changes', 'unsaved');
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(autosave, 2000);
-    captureHistoryState();
-  } else {
-    updateAutosaveStatus('Creating draft…', 'saving');
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(manuallySave, 500);
-  }
-};
-  // --- Keyboard shortcuts ---
+  // --- Keyboard shortcuts (unchanged) ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -563,7 +528,41 @@ const handleInput = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
 
-  // --- AI Functions ---
+  // --- ✅ CRITICAL: Global selection tracker ---
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        setHasActiveSelection(false);
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      if (!canvas.contains(range.commonAncestorContainer)) {
+        setHasActiveSelection(false);
+        return;
+      }
+
+      const text = selection.toString().trim();
+      if (text) {
+        lastValidSelectionTextRef.current = text;
+        setHasActiveSelection(true);
+      } else {
+        lastValidSelectionTextRef.current = null;
+        setHasActiveSelection(false);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
+
+  // --- AI Functions (mostly unchanged) ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
       method: 'POST',
@@ -666,20 +665,6 @@ const handleInput = () => {
     document.body.appendChild(modal);
   };
 
-  const insertTextAtCursor = (el: HTMLDivElement, text: string) => {
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      range.collapse(false);
-      range.insertNode(document.createTextNode(text));
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    } else {
-      el.textContent += text;
-    }
-  };
-
   const applyChosenText = (chosen: string, hadSelection: boolean, canvas: HTMLDivElement) => {
     if (hadSelection) {
       const sel = window.getSelection();
@@ -696,12 +681,9 @@ const handleInput = () => {
       }
     }
     canvas.textContent = chosen;
-    // After AI edit, clear our saved selection
-    setSelectedText(null);
-    setHasActiveSelection(false);
   };
 
-  // --- Handle AI Operations ---
+  // --- AI Handlers (now all use the ref) ---
   const handleGenerateSpark = async () => {
     if (!canvasRef.current || !titleRef.current) return;
     captureHistoryState();
@@ -739,7 +721,17 @@ const handleInput = () => {
       if (isEmpty) {
         canvasRef.current.textContent = sentence + ' ';
       } else {
-        insertTextAtCursor(canvasRef.current, ' ' + sentence + ' ');
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.collapse(false);
+          range.insertNode(document.createTextNode(' ' + sentence + ' '));
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          canvasRef.current.textContent += ' ' + sentence + ' ';
+        }
       }
       setIsApplyingHistory(false);
       captureHistoryState();
@@ -754,19 +746,18 @@ const handleInput = () => {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      setSelectedText(null);
+      lastValidSelectionTextRef.current = null;
       setHasActiveSelection(false);
     }
   };
 
-  // 🔥 CRITICAL: Use saved selectedText, NOT live selection
   const handleRewriteSelection = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const fullText = canvas.textContent.trim();
-    const text = selectedText || fullText;
-    const hasSelection = !!selectedText;
+    // 🔥 Use the ref, not state
+    const text = lastValidSelectionTextRef.current || canvas.textContent.trim();
+    const hasSelection = !!lastValidSelectionTextRef.current;
 
     if (!text) {
       showToast('No text to rewrite', 'info');
@@ -801,7 +792,6 @@ const handleInput = () => {
           const canvas = canvasRef.current;
           canvas.focus();
           setIsApplyingHistory(true);
-          // Use hasSelection to decide replacement strategy
           applyChosenText(chosen, hasSelection, canvas);
           setIsApplyingHistory(false);
           captureHistoryState();
@@ -820,18 +810,19 @@ const handleInput = () => {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      setSelectedText(null);
+      lastValidSelectionTextRef.current = null;
       setHasActiveSelection(false);
     }
   };
 
   const handleAdjustTone = async () => {
-    if (!hasActiveSelection || !selectedText) {
+    // 🔥 Use the ref — no more "select text" false negatives!
+    const text = lastValidSelectionTextRef.current;
+    if (!text) {
       showToast('Select text to adjust tone', 'info');
       return;
     }
 
-    const text = selectedText;
     captureHistoryState();
     setIsAiOperation(true);
 
@@ -872,22 +863,22 @@ const handleInput = () => {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      setSelectedText(null);
+      lastValidSelectionTextRef.current = null;
       setHasActiveSelection(false);
     }
   };
 
   const handleExpandText = async () => {
-    if (!hasActiveSelection || !selectedText) {
+    const text = lastValidSelectionTextRef.current;
+    if (!text) {
       showToast('Select text to expand', 'info');
       return;
     }
-    if (selectedText.split(' ').length > 50) {
+    if (text.split(' ').length > 50) {
       showToast('Select ≤50 words to expand', 'info');
       return;
     }
 
-    const text = selectedText;
     captureHistoryState();
     setIsAiOperation(true);
 
@@ -928,22 +919,22 @@ const handleInput = () => {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      setSelectedText(null);
+      lastValidSelectionTextRef.current = null;
       setHasActiveSelection(false);
     }
   };
 
   const handleCondenseText = async () => {
-    if (!hasActiveSelection || !selectedText) {
+    const text = lastValidSelectionTextRef.current;
+    if (!text) {
       showToast('Select text to condense', 'info');
       return;
     }
-    if (selectedText.split(' ').length < 15) {
+    if (text.split(' ').length < 15) {
       showToast('Text is too short to condense effectively', 'info');
       return;
     }
 
-    const text = selectedText;
     captureHistoryState();
     setIsAiOperation(true);
 
@@ -984,32 +975,18 @@ const handleInput = () => {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      setSelectedText(null);
+      lastValidSelectionTextRef.current = null;
       setHasActiveSelection(false);
     }
   };
 
   // --- Initial load ---
- useEffect(() => {
-  loadAllDrafts();
-  resetHistory();
-  captureHistoryState();
-  updateWordCount();
-
-  // NEW: Capture selection when canvas loses focus (critical for mobile)
-  const handleFocusOut = () => {
-    saveCurrentSelection();
-  };
-  const canvas = canvasRef.current;
-  canvas?.addEventListener('focusout', handleFocusOut);
-
-  return () => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
-    if (variationPickerRef.current) variationPickerRef.current.remove();
-    canvas?.removeEventListener('focusout', handleFocusOut);
-  };
-}, []);
+  useEffect(() => {
+    loadAllDrafts();
+    resetHistory();
+    captureHistoryState();
+    updateWordCount();
+  }, []);
 
   // --- Render UI ---
   return (
@@ -1129,18 +1106,14 @@ const handleInput = () => {
           </div>
         </div>
         <div
-  ref={canvasRef}
-  contentEditable
-  className="writing-canvas"
-  data-placeholder="Start writing your masterpiece…"
-  onInput={handleInput}
-  onSelect={saveCurrentSelection}
-  onMouseUp={saveCurrentSelection}
-  onTouchEnd={saveCurrentSelection}
-  onPointerUp={saveCurrentSelection} // ← ADD THIS (works on iOS/Android)
-  onFocus={saveCurrentSelection}     // ← ADD THIS (captures on focus-in)
-  onBlur={(e) => { /* do nothing */ }}
-></div>
+          ref={canvasRef}
+          contentEditable
+          className="writing-canvas"
+          data-placeholder="Start writing your masterpiece…"
+          onInput={handleInput}
+          // We no longer need onSelect, onMouseUp, etc. for AI logic
+        >
+        </div>
         <div className="writing-footer">
           <span>{wordCount} words</span>
         </div>
