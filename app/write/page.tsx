@@ -2,17 +2,14 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
 async function getCurrentUserId() {
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id || null;
 }
-
 // --- Types ---
 interface DraftListItem {
   id: string;
@@ -20,45 +17,38 @@ interface DraftListItem {
   updated_at?: string;
   lastEdited?: string;
 }
-
 interface FullDraft {
   id: string;
   title: string;
   content: string;
   updated_at?: string;
 }
-
 interface HistoryState {
   content: string;
   title: string;
   selection: SelectionState | null;
   timestamp: number;
 }
-
 interface SelectionState {
   startOffset: number;
   endOffset: number;
   startContainerPath: ElementPathStep[];
   endContainerPath: ElementPathStep[];
 }
-
 interface ElementPathStep {
   nodeType: number;
   nodeName: string;
   index: number;
 }
-
 const HISTORY_OPTIONS = {
   MAX_STATES: 100,
   THROTTLE_DELAY: 300,
 };
-
 const escapeHtml = (text: string): string => {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 };
-
 const formatTimeAgo = (date: Date): string => {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -70,9 +60,7 @@ const formatTimeAgo = (date: Date): string => {
   if (diffHr < 24) return `${diffHr} hr ago`;
   return date.toLocaleDateString();
 };
-
 const generateId = (): string => 'local_' + Math.random().toString(36).substring(2, 11);
-
 // --- Main Component ---
 export default function WritePage() {
   // --- Refs ---
@@ -83,7 +71,6 @@ export default function WritePage() {
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -100,123 +87,59 @@ export default function WritePage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [selectionToolbarVisible, setSelectionToolbarVisible] = useState(false);
   const [toolbarPosition, setToolbarPosition] = useState({ top: 0, left: 0 });
-  const [selectedText, setSelectedText] = useState('');
-
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 2500);
   }, []);
-
   const updateAutosaveStatus = (text: string, type: typeof autosaveStatusType) => {
     setAutosaveStatus(text);
     setAutosaveStatusType(type);
   };
-
   // --- Selection utils ---
-  const getSelectedText = (): string => {
-    if (!canvasRef.current) return '';
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return '';
-    const range = selection.getRangeAt(0);
-    if (!canvasRef.current.contains(range.commonAncestorContainer)) return '';
-    return range.toString().trim();
-  };
-
   const saveCurrentSelection = () => {
     if (!canvasRef.current) return;
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
-      const text = range.toString().trim();
-      
-      // Only show toolbar for actual selections (not cursor placement)
-      if (canvasRef.current.contains(range.commonAncestorContainer) && text.length > 0) {
-        // Save the selection range and text
+      if (canvasRef.current.contains(range.commonAncestorContainer)) {
         currentSelectionRangeRef.current = range.cloneRange();
-        setSelectedText(text);
         showSelectionToolbar(range);
         return;
       }
     }
     hideSelectionToolbar();
   };
-
   const showSelectionToolbar = (range: Range) => {
-    if (!toolbarRef.current) return;
-    
-    // Get the selection rectangle
     const rect = range.getBoundingClientRect();
-    
-    // Don't show toolbar for zero-width selections
     if (rect.width === 0 && rect.height === 0) {
       hideSelectionToolbar();
       return;
     }
-    
-    // Get toolbar dimensions
-    const toolbarWidth = 320; // Approximate width of the toolbar with labels
-    const toolbarHeight = 60;
-    
-    // Calculate ideal position (centered above selection)
-    let top = window.scrollY + rect.top - toolbarHeight - 12;
-    let left = window.scrollX + rect.left + (rect.width / 2) - (toolbarWidth / 2);
-    
-    // Ensure toolbar stays within viewport bounds
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    
-    // Don't let toolbar go off left edge
-    if (left < 10) left = 10;
-    
-    // Don't let toolbar go off right edge
-    if (left + toolbarWidth > viewportWidth - 10) {
-      left = viewportWidth - toolbarWidth - 10;
-    }
-    
-    // Don't let toolbar go off top edge
-    if (top < 10) top = 10;
-    
-    // Position the toolbar
-    setToolbarPosition({ top, left });
+    const toolbarHeight = 70; // Adjusted for the taller toolbar with labels
+    const top = window.scrollY + rect.top - toolbarHeight - 8;
+    const left = window.scrollX + rect.left + rect.width / 2; // Center point of selection
+    setToolbarPosition({ top: Math.max(10, top), left });
     setSelectionToolbarVisible(true);
-    
-    // Force keyboard dismissal on mobile
-    if (canvasRef.current) {
-      canvasRef.current.blur();
-      setTimeout(() => {
-        canvasRef.current?.focus({ preventScroll: true });
-      }, 100);
-    }
   };
-
   const hideSelectionToolbar = () => {
     if (selectionToolbarVisible) {
       setSelectionToolbarVisible(false);
-      setSelectedText('');
-      currentSelectionRangeRef.current = null;
     }
   };
-
   const restoreSavedSelection = (): boolean => {
     const range = currentSelectionRangeRef.current;
     if (!range || !canvasRef.current) return false;
-    
     try {
       const selection = window.getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.warn('Selection restore failed', e);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return true;
+    } catch {
       currentSelectionRangeRef.current = null;
       return false;
     }
   };
-
   const getElementPath = (element: Node, root: Node): ElementPathStep[] => {
     if (element === root) return [];
     const path: ElementPathStep[] = [];
@@ -239,7 +162,6 @@ export default function WritePage() {
     }
     return path;
   };
-
   const resolveElementPath = (path: ElementPathStep[], root: Node): Node | null => {
     if (path.length === 0) return root;
     let current: Node = root;
@@ -262,7 +184,6 @@ export default function WritePage() {
     }
     return current;
   };
-
   const saveSelectionState = (): SelectionState | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -277,7 +198,6 @@ export default function WritePage() {
       endContainerPath: getElementPath(range.endContainer, canvas),
     };
   };
-
   const restoreSelectionState = (state: SelectionState | null) => {
     if (!state || !canvasRef.current) return;
     const startContainer = resolveElementPath(state.startContainerPath, canvasRef.current);
@@ -298,7 +218,6 @@ export default function WritePage() {
       console.warn('Selection restore failed', e);
     }
   };
-
   // --- History ---
   const resetHistory = () => {
     setHistoryStack([]);
@@ -309,9 +228,7 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
   };
-
   const shouldCaptureHistory = () => !isApplyingHistory && !isAiOperation;
-
   const captureHistoryState = () => {
     if (!shouldCaptureHistory()) return;
     const now = Date.now();
@@ -343,7 +260,6 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
   };
-
   const applyHistoryState = (state: HistoryState) => {
     if (!canvasRef.current || !titleRef.current) return;
     canvasRef.current.textContent = state.content;
@@ -352,7 +268,6 @@ export default function WritePage() {
     updateWordCount();
     updateAutosaveStatus('History restored', 'info');
   };
-
   const undo = () => {
     if (currentHistoryIndex <= 0 || historyStack.length === 0) {
       showToast('No more undo history', 'info');
@@ -364,7 +279,6 @@ export default function WritePage() {
     setIsApplyingHistory(false);
     showToast('Changes undone', 'success');
   };
-
   const redo = () => {
     if (currentHistoryIndex >= historyStack.length - 1) {
       showToast('No more redo history', 'info');
@@ -376,7 +290,6 @@ export default function WritePage() {
     setIsApplyingHistory(false);
     showToast('Changes redone', 'success');
   };
-
   // --- Word count ---
   const updateWordCount = () => {
     const canvas = canvasRef.current;
@@ -385,13 +298,11 @@ export default function WritePage() {
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     setWordCount(words);
   };
-
   // --- Local storage ---
   const getLocalDrafts = (): FullDraft[] => {
     const stored = localStorage.getItem('localDrafts');
     return stored ? JSON.parse(stored) : [];
   };
-
   const saveToLocalDrafts = (draft: FullDraft) => {
     const drafts = getLocalDrafts();
     const index = drafts.findIndex((d) => d.id === draft.id);
@@ -399,7 +310,6 @@ export default function WritePage() {
     else drafts.push(draft);
     localStorage.setItem('localDrafts', JSON.stringify(drafts));
   };
-
   // --- Supabase draft persistence ---
   const saveDraftToSupabase = async (content: string, title: string): Promise<string> => {
     const userId = await getCurrentUserId();
@@ -432,7 +342,6 @@ export default function WritePage() {
     setIsDirty(false);
     return currentDraftId!;
   };
-
   const loadDraft = async (id: string) => {
     resetHistory();
     setIsApplyingHistory(true);
@@ -474,7 +383,6 @@ export default function WritePage() {
     captureHistoryState();
     setIsApplyingHistory(false);
   };
-
   const loadAllDrafts = async () => {
     const userId = await getCurrentUserId();
     let drafts: DraftListItem[] = [];
@@ -503,7 +411,6 @@ export default function WritePage() {
       }))
     );
   };
-
   // --- Save logic ---
   const manuallySave = async () => {
     const canvas = canvasRef.current;
@@ -542,7 +449,6 @@ export default function WritePage() {
       }
     }
   };
-
   const autosave = async () => {
     if (!isDirty || !currentDraftId) return;
     const canvas = canvasRef.current;
@@ -568,7 +474,6 @@ export default function WritePage() {
       }, 3000);
     }
   };
-
   // --- Input handler ---
   const handleInput = () => {
     setIsDirty(true);
@@ -586,7 +491,6 @@ export default function WritePage() {
       saveTimeoutRef.current = setTimeout(manuallySave, 500);
     }
   };
-
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -606,7 +510,6 @@ export default function WritePage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
-
   // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
@@ -620,7 +523,6 @@ export default function WritePage() {
     }
     return await res.json();
   };
-
   const showVariationPicker = (
     originalText: string,
     variations: string[],
@@ -703,7 +605,6 @@ export default function WritePage() {
     modal.appendChild(picker);
     document.body.appendChild(modal);
   };
-
   const insertTextAtCursor = (el: HTMLDivElement, text: string) => {
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
@@ -717,10 +618,25 @@ export default function WritePage() {
       el.textContent += text;
     }
   };
-
+  const applyChosenText = (chosen: string, hadSelection: boolean, canvas: HTMLDivElement) => {
+    if (hadSelection) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        if (!range.collapsed) {
+          range.deleteContents();
+          range.insertNode(document.createTextNode(chosen));
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+      }
+    }
+    canvas.textContent = chosen;
+  };
   // --- Handle AI Operations ---
   const handleGenerateSpark = async () => {
-    hideSelectionToolbar();
     if (!canvasRef.current || !titleRef.current) return;
     captureHistoryState();
     setIsAiOperation(true);
@@ -767,21 +683,27 @@ export default function WritePage() {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
+      hideSelectionToolbar();
     }
   };
-
+  const getSelectedText = (): string => {
+    if (!canvasRef.current) return '';
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return '';
+    const range = selection.getRangeAt(0);
+    if (!canvasRef.current.contains(range.commonAncestorContainer)) return '';
+    return range.toString().trim();
+  };
   const handleRewriteSelection = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('No text selected', 'info');
-      hideSelectionToolbar();
       return;
     }
     if (text.split(' ').length > 50) {
       showToast('Please select ≤50 words for best results', 'info');
       return;
     }
-    hideSelectionToolbar();
     captureHistoryState();
     setIsAiOperation(true);
     try {
@@ -799,27 +721,21 @@ export default function WritePage() {
       if (!variations.length) throw new Error('No output');
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
-          // First, try to restore the selection
-          if (restoreSavedSelection()) {
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              if (!range.collapsed) {
-                // Delete the current selection and insert the new text
-                range.deleteContents();
-                range.insertNode(document.createTextNode(chosen));
-                // Move cursor to end of inserted text
-                range.collapse(false);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                canvasRef.current?.focus();
-              }
-            }
-          } else {
-            // Fallback: if we can't restore selection, just append to end
-            canvasRef.current.textContent += '\n' + chosen;
-          }
+          const canvas = canvasRef.current;
+          canvas.focus();
+          restoreSavedSelection();
           setIsApplyingHistory(true);
+          const sel = window.getSelection();
+if (sel && sel.rangeCount > 0) {
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed) {
+    range.deleteContents();
+    range.insertNode(document.createTextNode(chosen));
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
           setIsApplyingHistory(false);
           captureHistoryState();
           setIsDirty(true);
@@ -841,19 +757,16 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   const handleAdjustTone = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('Select text to adjust tone', 'info');
-      hideSelectionToolbar();
       return;
     }
-    hideSelectionToolbar();
     captureHistoryState();
     setIsAiOperation(true);
     try {
-      updateAutosaveStatus('🎨 Generating tones...', 'saving');
+      updateAutosaveStatus('🎭 Generating tones...', 'saving');
       const data = await callAiApi({
         input: text,
         instruction: 'Rewrite this to sound formal and professional. Keep the core meaning. Return ONLY the rewritten text, nothing else.',
@@ -864,42 +777,36 @@ export default function WritePage() {
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-      if (!variations.length) throw new Error('No output');
-      showVariationPicker(text, variations, (chosen) => {
-        if (canvasRef.current) {
-          // First, try to restore the selection
-          if (restoreSavedSelection()) {
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              if (!range.collapsed) {
-                // Delete the current selection and insert the new text
-                range.deleteContents();
-                range.insertNode(document.createTextNode(chosen));
-                // Move cursor to end of inserted text
-                range.collapse(false);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                canvasRef.current?.focus();
-              }
-            }
-          } else {
-            // Fallback: if we can't restore selection, just append to end
-            canvasRef.current.textContent += '\n' + chosen;
-          }
-          setIsApplyingHistory(true);
-          setIsApplyingHistory(false);
-          captureHistoryState();
-          setIsDirty(true);
-          updateWordCount();
-          updateAutosaveStatus('Tone adjusted!', 'saved');
-          showToast('✅ Tone Adjusted!', 'success');
-        }
-        currentSelectionRangeRef.current = null;
-      }, () => {
-        updateAutosaveStatus('Canceled', 'info');
-        currentSelectionRangeRef.current = null;
-      });
+     showVariationPicker(text, variations, (chosen) => {
+  if (canvasRef.current) {
+    const canvas = canvasRef.current;
+    canvas.focus();
+    restoreSavedSelection(); // This helps, but doesn't guarantee sel != null
+    setIsApplyingHistory(true);
+    // Safe selection handling
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(chosen));
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+    setIsApplyingHistory(false);
+    captureHistoryState();
+    setIsDirty(true);
+    updateWordCount();
+    updateAutosaveStatus('Rewritten!', 'saved');
+    showToast('✅ Tone Adjusted!', 'success');
+  }
+  currentSelectionRangeRef.current = null;
+}, () => {
+  updateAutosaveStatus('Canceled', 'info');
+  currentSelectionRangeRef.current = null;
+});
     } catch (err) {
       console.error('Tone failed:', err);
       showToast('Tone adjustment failed – try again', 'error');
@@ -909,23 +816,20 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   const handleExpandText = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('Select text to expand', 'info');
-      hideSelectionToolbar();
       return;
     }
     if (text.split(' ').length > 50) {
       showToast('Select ≤50 words to expand', 'info');
       return;
     }
-    hideSelectionToolbar();
     captureHistoryState();
     setIsAiOperation(true);
     try {
-      updateAutosaveStatus('📏 Generating expansions...', 'saving');
+      updateAutosaveStatus('📈 Generating expansions...', 'saving');
       const data = await callAiApi({
         input: text,
         instruction: 'Expand this text by adding more detail, examples, or explanation. Make it roughly 2–3 times longer while keeping the original meaning. Return ONLY the expanded text, nothing else.',
@@ -936,42 +840,36 @@ export default function WritePage() {
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-      if (!variations.length) throw new Error('No output');
       showVariationPicker(text, variations, (chosen) => {
-        if (canvasRef.current) {
-          // First, try to restore the selection
-          if (restoreSavedSelection()) {
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              if (!range.collapsed) {
-                // Delete the current selection and insert the new text
-                range.deleteContents();
-                range.insertNode(document.createTextNode(chosen));
-                // Move cursor to end of inserted text
-                range.collapse(false);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                canvasRef.current?.focus();
-              }
-            }
-          } else {
-            // Fallback: if we can't restore selection, just append to end
-            canvasRef.current.textContent += '\n' + chosen;
-          }
-          setIsApplyingHistory(true);
-          setIsApplyingHistory(false);
-          captureHistoryState();
-          setIsDirty(true);
-          updateWordCount();
-          updateAutosaveStatus('Expanded!', 'saved');
-          showToast('✅ Text Expanded!', 'success');
-        }
-        currentSelectionRangeRef.current = null;
-      }, () => {
-        updateAutosaveStatus('Canceled', 'info');
-        currentSelectionRangeRef.current = null;
-      });
+  if (canvasRef.current) {
+    const canvas = canvasRef.current;
+    canvas.focus();
+    restoreSavedSelection(); // This helps, but doesn't guarantee sel != null
+    setIsApplyingHistory(true);
+    // Safe selection handling
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(chosen));
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+    setIsApplyingHistory(false);
+    captureHistoryState();
+    setIsDirty(true);
+    updateWordCount();
+    updateAutosaveStatus('Rewritten!', 'saved');
+    showToast('✅ Text Expanded!', 'success');
+  }
+  currentSelectionRangeRef.current = null;
+}, () => {
+  updateAutosaveStatus('Canceled', 'info');
+  currentSelectionRangeRef.current = null;
+});
     } catch (err) {
       console.error('Expand failed:', err);
       showToast('Expansion failed – try again', 'error');
@@ -981,19 +879,16 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   const handleCondenseText = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('Select text to condense', 'info');
-      hideSelectionToolbar();
       return;
     }
     if (text.split(' ').length < 15) {
       showToast('Text is too short to condense effectively', 'info');
       return;
     }
-    hideSelectionToolbar();
     captureHistoryState();
     setIsAiOperation(true);
     try {
@@ -1008,42 +903,36 @@ export default function WritePage() {
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-      if (!variations.length) throw new Error('No output');
       showVariationPicker(text, variations, (chosen) => {
-        if (canvasRef.current) {
-          // First, try to restore the selection
-          if (restoreSavedSelection()) {
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              if (!range.collapsed) {
-                // Delete the current selection and insert the new text
-                range.deleteContents();
-                range.insertNode(document.createTextNode(chosen));
-                // Move cursor to end of inserted text
-                range.collapse(false);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                canvasRef.current?.focus();
-              }
-            }
-          } else {
-            // Fallback: if we can't restore selection, just append to end
-            canvasRef.current.textContent += '\n' + chosen;
-          }
-          setIsApplyingHistory(true);
-          setIsApplyingHistory(false);
-          captureHistoryState();
-          setIsDirty(true);
-          updateWordCount();
-          updateAutosaveStatus('Condensed!', 'saved');
-          showToast('✅ Text Condensed!', 'success');
-        }
-        currentSelectionRangeRef.current = null;
-      }, () => {
-        updateAutosaveStatus('Canceled', 'info');
-        currentSelectionRangeRef.current = null;
-      });
+  if (canvasRef.current) {
+    const canvas = canvasRef.current;
+    canvas.focus();
+    restoreSavedSelection(); // This helps, but doesn't guarantee sel != null
+    setIsApplyingHistory(true);
+    // Safe selection handling
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(chosen));
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+    setIsApplyingHistory(false);
+    captureHistoryState();
+    setIsDirty(true);
+    updateWordCount();
+    updateAutosaveStatus('Rewritten!', 'saved');
+    showToast('✅ Text Condensed!', 'success');
+  }
+  currentSelectionRangeRef.current = null;
+}, () => {
+  updateAutosaveStatus('Canceled', 'info');
+  currentSelectionRangeRef.current = null;
+});
     } catch (err) {
       console.error('Condense failed:', err);
       showToast('Condensation failed – try again', 'error');
@@ -1053,7 +942,6 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   // --- Blur/close handling ---
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1061,24 +949,31 @@ export default function WritePage() {
         toolbarRef.current &&
         !toolbarRef.current.contains(e.target as Node) &&
         canvasRef.current &&
-        !canvasRef.current.contains(e.target as Node) &&
-        // Don't hide if clicking on variation picker (if it exists)
-        !variationPickerRef.current?.contains(e.target as Node)
+        !canvasRef.current.contains(e.target as Node)
       ) {
         hideSelectionToolbar();
       }
     };
-    
+    const handleScroll = () => {
+      if (selectionToolbarVisible) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          showSelectionToolbar(sel.getRangeAt(0));
+        } else {
+          hideSelectionToolbar();
+        }
+      }
+    };
     document.addEventListener('click', handleClickOutside);
-    
+    window.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll);
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
       if (variationPickerRef.current) variationPickerRef.current.remove();
     };
-  }, []);
-
+  }, [selectionToolbarVisible]);
   // --- Initial load ---
   useEffect(() => {
     loadAllDrafts();
@@ -1086,7 +981,6 @@ export default function WritePage() {
     captureHistoryState();
     updateWordCount();
   }, []);
-
   // --- Render UI ---
   return (
     <div className="writing-app">
@@ -1188,6 +1082,7 @@ export default function WritePage() {
           className="writing-canvas"
           data-placeholder="Start writing your masterpiece…"
           onInput={handleInput}
+          onSelect={saveCurrentSelection}
           onTouchEnd={saveCurrentSelection}
           onMouseUp={saveCurrentSelection}
         ></div>
@@ -1195,9 +1090,8 @@ export default function WritePage() {
           <span>{wordCount} words</span>
         </div>
       </div>
-      
       {/* Selection Toolbar (Mobile/Any) */}
-      {selectionToolbarVisible && selectedText && (
+      {selectionToolbarVisible && (
         <div
           ref={toolbarRef}
           style={{
@@ -1206,115 +1100,83 @@ export default function WritePage() {
             left: `${toolbarPosition.left}px`,
             display: 'flex',
             gap: '8px',
-            padding: '8px',
+            padding: '8px 12px',
             background: '#1e1e1e',
-            borderRadius: '16px',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            borderRadius: '24px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
             zIndex: 1001,
-            maxWidth: '320px',
-            width: '90%',
-            boxSizing: 'border-box',
+            transform: 'translateX(-50%)',
+            maxWidth: '90vw',
+            overflowX: 'auto',
           }}
         >
-          <button
-            className="toolbar-btn"
-            aria-label="Rewrite text"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              background: 'transparent',
-              border: 'none',
-              color: 'white',
-              padding: '6px',
-              fontSize: '1.1em',
-              cursor: 'pointer',
-              flex: 1,
-              minWidth: '50px',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRewriteSelection();
-            }}
-          >
-            🧠
-            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Rewrite</span>
-          </button>
-          <button
-            className="toolbar-btn"
-            aria-label="Adjust tone"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              background: 'transparent',
-              border: 'none',
-              color: 'white',
-              padding: '6px',
-              fontSize: '1.1em',
-              cursor: 'pointer',
-              flex: 1,
-              minWidth: '50px',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleAdjustTone();
-            }}
-          >
-            🎨
-            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Tone</span>
-          </button>
-          <button
-            className="toolbar-btn"
-            aria-label="Expand text"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              background: 'transparent',
-              border: 'none',
-              color: 'white',
-              padding: '6px',
-              fontSize: '1.1em',
-              cursor: 'pointer',
-              flex: 1,
-              minWidth: '50px',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleExpandText();
-            }}
-          >
-            📏
-            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Expand</span>
-          </button>
-          <button
-            className="toolbar-btn"
-            aria-label="Condense text"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              background: 'transparent',
-              border: 'none',
-              color: 'white',
-              padding: '6px',
-              fontSize: '1.1em',
-              cursor: 'pointer',
-              flex: 1,
-              minWidth: '50px',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCondenseText();
-            }}
-          >
-            📉
-            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Condense</span>
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '0.75em' }}>
+            <button
+              className="btn ai-btn-small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRewriteSelection();
+              }}
+              style={{ padding: '6px', fontSize: '1.2em', marginBottom: '2px' }}
+            >
+              🧠
+            </button>
+            <span style={{ color: '#fff', whiteSpace: 'nowrap' }}>Rewrite</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '0.75em' }}>
+            <button
+              className="btn ai-btn-small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAdjustTone();
+              }}
+              style={{ padding: '6px', fontSize: '1.2em', marginBottom: '2px' }}
+            >
+              🎭
+            </button>
+            <span style={{ color: '#fff', whiteSpace: 'nowrap' }}>Tone</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '0.75em' }}>
+            <button
+              className="btn ai-btn-small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleExpandText();
+              }}
+              style={{ padding: '6px', fontSize: '1.2em', marginBottom: '2px' }}
+            >
+              📈
+            </button>
+            <span style={{ color: '#fff', whiteSpace: 'nowrap' }}>Expand</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '0.75em' }}>
+            <button
+              className="btn ai-btn-small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCondenseText();
+              }}
+              style={{ padding: '6px', fontSize: '1.2em', marginBottom: '2px' }}
+            >
+              📉
+            </button>
+            <span style={{ color: '#fff', whiteSpace: 'nowrap' }}>Condense</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '0.75em' }}>
+            <button
+              className="btn ai-btn-small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleGenerateSpark();
+              }}
+              style={{ padding: '6px', fontSize: '1.2em', marginBottom: '2px' }}
+            >
+              ✨
+            </button>
+            <span style={{ color: '#fff', whiteSpace: 'nowrap' }}>Spark</span>
+          </div>
         </div>
       )}
-      
       {/* Toast */}
       {toast && (
         <div
