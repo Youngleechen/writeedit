@@ -517,27 +517,31 @@ export default function WritePage() {
     }
   };
 
-  // --- Input handler ---
-  const handleInput = () => {
-    setIsDirty(true);
-    updateWordCount();
-    // 🔥 Clear selection on edit — this is expected behavior
-    setSelectedText(null);
-    setHasActiveSelection(false);
-    currentSelectionRangeRef.current = null;
+const handleInput = () => {
+  setIsDirty(true);
+  updateWordCount();
 
-    if (currentDraftId) {
-      updateAutosaveStatus('Unsaved changes', 'unsaved');
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(autosave, 2000);
-      captureHistoryState();
-    } else {
-      updateAutosaveStatus('Creating draft…', 'saving');
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(manuallySave, 500);
+  // Delay clearing selection slightly to allow AI buttons to read `selectedText`
+  // before it's wiped out by editing actions.
+  setTimeout(() => {
+    if (!isAiOperation && !isApplyingHistory) {
+      setSelectedText(null);
+      setHasActiveSelection(false);
+      currentSelectionRangeRef.current = null;
     }
-  };
+  }, 50);
 
+  if (currentDraftId) {
+    updateAutosaveStatus('Unsaved changes', 'unsaved');
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(autosave, 2000);
+    captureHistoryState();
+  } else {
+    updateAutosaveStatus('Creating draft…', 'saving');
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(manuallySave, 500);
+  }
+};
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
