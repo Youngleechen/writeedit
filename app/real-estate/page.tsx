@@ -32,20 +32,20 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// Extend your local property type
 interface Property {
-  id: number;
+  id: string;
   title: string;
   location: string;
   price: string;
   beds: number;
   baths: number;
   sqft: number;
-  image: string;
+  image: string; // this will be updated from DB
   featured: boolean;
   rating: number;
   type: string;
   description: string;
-  created_at?: string;
 }
 
 const App = () => {
@@ -63,73 +63,171 @@ const App = () => {
     { value: '$2.1B', label: 'Total Sales Volume', icon: <TrendingUp className="w-6 h-6" /> },
   ];
 
-  // Load properties from Supabase on mount
+  // Initialize properties from blog_posts (auto-creates if missing)
   useEffect(() => {
-    const loadProperties = async () => {
+    const initializeProperties = async () => {
       setIsLoading(true);
+      
       try {
-        const { data, error } = await supabase
-          .from('properties')
-          .select('*')
-          .order('created_at', { ascending: false });
+        // Define mock properties (will be saved as "property" type in blog_posts)
+        const mockProperties: Property[] = [
+          {
+            id: 'prop_1',
+            title: 'Luxury Waterfront Villa',
+            location: 'Malibu, California',
+            price: '$8,500,000',
+            beds: 6,
+            baths: 8,
+            sqft: 12500,
+            featured: true,
+            rating: 4.9,
+            type: 'Villa',
+            description: 'Stunning oceanfront estate with panoramic views, private beach access, infinity pool, and smart home technology throughout.',
+            image: 'https://placehold.co/600x400/1a1a2e/ffffff?text=Luxury+Villa',
+          },
+          {
+            id: 'prop_2',
+            title: 'Modern Downtown Penthouse',
+            location: 'Manhattan, New York',
+            price: '$4,200,000',
+            beds: 3,
+            baths: 3,
+            sqft: 3200,
+            featured: true,
+            rating: 4.8,
+            type: 'Penthouse',
+            description: 'Contemporary penthouse featuring floor-to-ceiling windows, private rooftop terrace, and premium finishes throughout.',
+            image: 'https://placehold.co/600x400/16213e/ffffff?text=Modern+Penthouse',
+          },
+          {
+            id: 'prop_3',
+            title: 'Mountain Retreat Estate',
+            location: 'Aspen, Colorado',
+            price: '$6,800,000',
+            beds: 5,
+            baths: 6,
+            sqft: 8900,
+            featured: false,
+            rating: 4.7,
+            type: 'Estate',
+            description: 'Secluded mountain estate with ski-in/ski-out access, great room with stone fireplace, and expansive outdoor living spaces.',
+            image: 'https://placehold.co/600x400/0f3460/ffffff?text=Mountain+Estate',
+          },
+          {
+            id: 'prop_4',
+            title: 'Beachfront Condo Paradise',
+            location: 'Miami Beach, Florida',
+            price: '$2,950,000',
+            beds: 4,
+            baths: 4,
+            sqft: 3800,
+            featured: true,
+            rating: 4.9,
+            type: 'Condo',
+            description: 'Luxury beachfront condominium with direct ocean access, resort-style amenities, and designer interiors.',
+            image: 'https://placehold.co/600x400/533483/ffffff?text=Beachfront+Condo',
+          },
+          {
+            id: 'prop_5',
+            title: 'Historic Brownstone',
+            location: 'Brooklyn, New York',
+            price: '$3,750,000',
+            beds: 5,
+            baths: 4,
+            sqft: 4200,
+            featured: false,
+            rating: 4.6,
+            type: 'Brownstone',
+            description: 'Fully renovated historic brownstone featuring original architectural details, modern amenities, and private garden.',
+            image: 'https://placehold.co/600x400/e94560/ffffff?text=Historic+Brownstone',
+          },
+          {
+            id: 'prop_6',
+            title: 'Golf Course Mansion',
+            location: 'Scottsdale, Arizona',
+            price: '$5,200,000',
+            beds: 6,
+            baths: 7,
+            sqft: 9800,
+            featured: true,
+            rating: 4.8,
+            type: 'Mansion',
+            description: 'Mediterranean-style mansion overlooking championship golf course with resort-style pool, outdoor kitchen, and guest house.',
+            image: 'https://placehold.co/600x400/f7b267/ffffff?text=Golf+Mansion',
+          },
+        ];
 
-        if (error) throw error;
+        // Upsert into blog_posts (won't duplicate)
+        const blogRecords = mockProperties.map(p => ({
+          id: p.id,
+          title: p.title,
+          content: p.description,
+          image_url: p.image,
+          published: true,
+          user_id: 'system', // or use real user ID if authenticated
+          type: 'property',
+        }));
 
-        setProperties(data || []);
+        await supabase
+          .from('blog_posts')
+          .upsert(blogRecords, { onConflict: 'id' });
+
+        // Now fetch the latest image URLs (in case they were updated)
+        const { data: imageData, error: fetchError } = await supabase
+          .from('blog_posts')
+          .select('id, image_url')
+          .eq('type', 'property');
+
+        if (fetchError) throw fetchError;
+
+        const imageMap = new Map(imageData.map(row => [row.id, row.image_url]));
+
+        // Merge DB images into local state
+        const hydratedProperties = mockProperties.map(p => ({
+          ...p,
+          image: imageMap.get(p.id) || p.image,
+        }));
+
+        setProperties(hydratedProperties);
       } catch (err: any) {
-        console.error('Failed to load properties:', err.message);
-        alert('Failed to load properties. Check console for details.');
+        console.error('Failed to initialize properties:', err);
+        alert('Failed to load properties. Check console.');
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadProperties();
+    initializeProperties();
   }, []);
 
-  // Handle search filter
   const filteredProperties = properties.filter(
     (property) =>
       property.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       property.location.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Update property image in DB and local state
-  const updatePropertyImage = async (propertyId: number, newImageUrl: string) => {
-    try {
-      const { error } = await supabase
-        .from('properties')
-        .update({ image: newImageUrl })
-        .eq('id', propertyId);
-
-      if (error) throw error;
-
-      setProperties(prev =>
-        prev.map(p => p.id === propertyId ? { ...p, image: newImageUrl } : p)
-      );
-
-      if (selectedProperty && selectedProperty.id === propertyId) {
-        setSelectedProperty({ ...selectedProperty, image: newImageUrl });
-      }
-
-      alert('Image updated successfully!');
-    } catch (err: any) {
-      alert(`Failed to save image: ${err.message}`);
-    }
-  };
-
-  // Replace image handler (called from modal)
-  const handleReplaceImage = async (propertyId: number, newImageUrl: string) => {
+  // Handle image replacement — saves to blog_posts
+  const handleReplaceImage = async (propertyId: string, newImageUrl: string) => {
     // Update local state immediately
     setProperties(prev =>
       prev.map(p => p.id === propertyId ? { ...p, image: newImageUrl } : p)
     );
+
     if (selectedProperty && selectedProperty.id === propertyId) {
       setSelectedProperty({ ...selectedProperty, image: newImageUrl });
     }
 
-    // Persist to database
-    await updatePropertyImage(propertyId, newImageUrl);
+    // Save to Supabase
+    const { error } = await supabase
+      .from('blog_posts')
+      .update({ image_url: newImageUrl })
+      .eq('id', propertyId)
+      .eq('type', 'property');
+
+    if (error) {
+      alert(`Failed to save image: ${error.message}`);
+    }
+    // Success: image will persist on refresh
   };
 
   // Scroll effect for header
@@ -237,10 +335,8 @@ const App = () => {
           backgroundAttachment: 'fixed',
         }}
       >
-        {/* Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/80"></div>
 
-        {/* Content */}
         <div className="relative z-10 text-center text-white max-w-4xl mx-auto px-4" style={{ paddingTop: '120px', paddingBottom: '80px' }}>
           <motion.h1 
             className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 leading-tight"
@@ -282,7 +378,6 @@ const App = () => {
           </motion.div>
         </div>
 
-        {/* Scroll Down Indicator */}
         <motion.div 
           className="absolute bottom-8 left-1/2 transform -translate-x-1/2"
           animate={{ y: [0, 10, 0] }}
@@ -675,7 +770,7 @@ const App = () => {
 };
 
 // ✨ Reusable Upload Trigger Component (inside modal only)
-const ReplaceImageButton = ({ propertyId, currentImage, onReplace }: { propertyId: number; currentImage: string; onReplace: (id: number, url: string) => void }) => {
+const ReplaceImageButton = ({ propertyId, currentImage, onReplace }: { propertyId: string; currentImage: string; onReplace: (id: string, url: string) => void }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
