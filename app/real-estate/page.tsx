@@ -64,141 +64,74 @@ const App = () => {
   ];
 
   // Initialize properties from blog_posts (auto-creates if missing)
-  useEffect(() => {
-    const initializeProperties = async () => {
-      setIsLoading(true);
-      
-      try {
-        // Define mock properties (will be saved as "property" type in blog_posts)
-        const mockProperties: Property[] = [
-          {
-            id: 'prop_1',
-            title: 'Luxury Waterfront Villa',
-            location: 'Malibu, California',
-            price: '$8,500,000',
-            beds: 6,
-            baths: 8,
-            sqft: 12500,
-            featured: true,
-            rating: 4.9,
-            type: 'Villa',
-            description: 'Stunning oceanfront estate with panoramic views, private beach access, infinity pool, and smart home technology throughout.',
-            image: 'https://placehold.co/600x400/1a1a2e/ffffff?text=Luxury+Villa',
-          },
-          {
-            id: 'prop_2',
-            title: 'Modern Downtown Penthouse',
-            location: 'Manhattan, New York',
-            price: '$4,200,000',
-            beds: 3,
-            baths: 3,
-            sqft: 3200,
-            featured: true,
-            rating: 4.8,
-            type: 'Penthouse',
-            description: 'Contemporary penthouse featuring floor-to-ceiling windows, private rooftop terrace, and premium finishes throughout.',
-            image: 'https://placehold.co/600x400/16213e/ffffff?text=Modern+Penthouse',
-          },
-          {
-            id: 'prop_3',
-            title: 'Mountain Retreat Estate',
-            location: 'Aspen, Colorado',
-            price: '$6,800,000',
-            beds: 5,
-            baths: 6,
-            sqft: 8900,
-            featured: false,
-            rating: 4.7,
-            type: 'Estate',
-            description: 'Secluded mountain estate with ski-in/ski-out access, great room with stone fireplace, and expansive outdoor living spaces.',
-            image: 'https://placehold.co/600x400/0f3460/ffffff?text=Mountain+Estate',
-          },
-          {
-            id: 'prop_4',
-            title: 'Beachfront Condo Paradise',
-            location: 'Miami Beach, Florida',
-            price: '$2,950,000',
-            beds: 4,
-            baths: 4,
-            sqft: 3800,
-            featured: true,
-            rating: 4.9,
-            type: 'Condo',
-            description: 'Luxury beachfront condominium with direct ocean access, resort-style amenities, and designer interiors.',
-            image: 'https://placehold.co/600x400/533483/ffffff?text=Beachfront+Condo',
-          },
-          {
-            id: 'prop_5',
-            title: 'Historic Brownstone',
-            location: 'Brooklyn, New York',
-            price: '$3,750,000',
-            beds: 5,
-            baths: 4,
-            sqft: 4200,
-            featured: false,
-            rating: 4.6,
-            type: 'Brownstone',
-            description: 'Fully renovated historic brownstone featuring original architectural details, modern amenities, and private garden.',
-            image: 'https://placehold.co/600x400/e94560/ffffff?text=Historic+Brownstone',
-          },
-          {
-            id: 'prop_6',
-            title: 'Golf Course Mansion',
-            location: 'Scottsdale, Arizona',
-            price: '$5,200,000',
-            beds: 6,
-            baths: 7,
-            sqft: 9800,
-            featured: true,
-            rating: 4.8,
-            type: 'Mansion',
-            description: 'Mediterranean-style mansion overlooking championship golf course with resort-style pool, outdoor kitchen, and guest house.',
-            image: 'https://placehold.co/600x400/f7b267/ffffff?text=Golf+Mansion',
-          },
-        ];
+ useEffect(() => {
+  const initializeProperties = async () => {
+    setIsLoading(true);
+    
+    try {
+      // First, check if any property-type blog_posts already exist
+      const { data: existing, error: fetchError } = await supabase
+        .from('blog_posts')
+        .select('id, title, content, image_url, user_id, type')
+        .eq('type', 'property');
 
-        // Upsert into blog_posts (won't duplicate)
-        const blogRecords = mockProperties.map(p => ({
-          id: p.id,
-          title: p.title,
-          content: p.description,
-          image_url: p.image,
-          published: true,
-          user_id: 'system', // or use real user ID if authenticated
-          type: 'property',
+      if (fetchError) throw fetchError;
+
+      if (existing && existing.length > 0) {
+        // ✅ Database already seeded — hydrate from real data
+        const hydrated = existing.map(row => ({
+          id: row.id,
+          title: row.title,
+          location: '', // ⚠️ You’ll need to store location, beds, etc. in DB too!
+          price: '',
+          beds: 0,
+          baths: 0,
+          sqft: 0,
+          featured: false,
+          rating: 0,
+          type: 'Unknown',
+          description: row.content || '',
+          image: row.image_url || '',
         }));
 
-        await supabase
-          .from('blog_posts')
-          .upsert(blogRecords, { onConflict: 'id' });
-
-        // Now fetch the latest image URLs (in case they were updated)
-        const { data: imageData, error: fetchError } = await supabase
-          .from('blog_posts')
-          .select('id, image_url')
-          .eq('type', 'property');
-
-        if (fetchError) throw fetchError;
-
-        const imageMap = new Map(imageData.map(row => [row.id, row.image_url]));
-
-        // Merge DB images into local state
-        const hydratedProperties = mockProperties.map(p => ({
-          ...p,
-          image: imageMap.get(p.id) || p.image,
-        }));
-
-        setProperties(hydratedProperties);
-      } catch (err: any) {
-        console.error('Failed to initialize properties:', err);
-        alert('Failed to load properties. Check console.');
-      } finally {
+        // ❗ But wait: your mock data includes beds, price, etc. — currently NOT in DB!
+        setProperties(hydrated);
         setIsLoading(false);
+        return;
       }
-    };
 
-    initializeProperties();
-  }, []);
+      // ❌ No data exists → seed with mock data
+      const mockProperties: Property[] = [ /* your list */ ];
+
+      const blogRecords = mockProperties.map(p => ({
+        id: p.id,
+        title: p.title,
+        content: p.description,
+        image_url: p.image,
+        published: true,
+        user_id: 'system',
+        type: 'property',
+        // ❗ Add missing fields to DB if you want full persistence!
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('blog_posts')
+        .upsert(blogRecords, { onConflict: 'id' });
+
+      if (upsertError) throw upsertError;
+
+      // Use mock data as fallback
+      setProperties(mockProperties);
+    } catch (err: any) {
+      console.error('Failed to initialize properties:', err);
+      alert('Failed to load properties. Check console.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  initializeProperties();
+}, []);
 
   const filteredProperties = properties.filter(
     (property) =>
