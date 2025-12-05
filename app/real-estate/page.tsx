@@ -1,89 +1,83 @@
-// app/test-upload/page.tsx
-"use client";
+// app/upload/page.tsx
+'use client';
 
-import { useState, useRef } from 'react';
-import { Upload } from 'lucide-react';
-import { uploadImage } from '@/lib/uploadImage';
+import { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-export default function TestUploadPage() {
-  const [isLoggedIn] = useState(true); // toggle to false to hide upload
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  const handleUpload = (file: File) => {
-    uploadImage({
-      file,
-      entityType: 'test-page',
-      entityId: '1',
-    })
-      .then(() => alert('✅ Upload succeeded!'))
-      .catch((err) => alert('❌ Upload failed: ' + err.message));
-  };
+export default function UploadPage() {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState('');
 
-  const handleImageClick = () => {
-    if (isLoggedIn) {
-      fileInputRef.current?.click();
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
+  const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isLoggedIn) return;
-    const file = e.dataTransfer.files?.[0];
-    if (file?.type.startsWith('image/')) {
-      handleUpload(file);
+    if (!file) {
+      setMessage('Please select a file.');
+      return;
     }
-  };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setMessage('You must be signed in to upload.');
+      return;
+    }
+
+    setUploading(true);
+    setMessage('');
+
+    const filePath = `test-images/${user.id}/${Date.now()}_${file.name}`;
+
+    try {
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('test-images')
+        .upload(filePath, file, { upsert: false });
+
+      if (uploadError) throw uploadError;
+
+      // Optional: Save record to test_image_uploads table
+      const { error: dbError } = await supabase
+        .from('test_image_uploads')
+        .insert({ user_id: user.id, image_path: filePath });
+
+      if (dbError) console.warn('Saved to storage, but failed to log in DB:', dbError.message);
+
+      setMessage('✅ Upload successful!');
+      setFile(null);
+    } catch (err: any) {
+      setMessage(`❌ Upload failed: ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-12">
-      <h1 className="text-3xl font-bold mb-8">🧪 Upload Test Page</h1>
-      <p className="text-gray-400 mb-6">
-        {isLoggedIn ? '✅ Logged in – upload enabled' : '❌ Not logged in – upload hidden'}
-      </p>
-
-      {/* Uploadable image */}
-      <div
-        className="relative w-80 h-60 mx-auto bg-gray-800 rounded-xl flex items-center justify-center"
-        onClick={handleImageClick}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-      >
-        <span className="text-gray-500">Drag or click to upload</span>
-
-        {isLoggedIn && (
-          <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Upload className="w-6 h-6 text-white" />
-          </div>
-        )}
-      </div>
-
-      {/* Hidden file input */}
-      {isLoggedIn && (
+    <div className="max-w-md mx-auto p-6 mt-10">
+      <h1 className="text-2xl font-bold mb-4">Upload Test Image</h1>
+      <form onSubmit={handleUpload} className="space-y-4">
         <input
-          ref={fileInputRef}
           type="file"
           accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleUpload(file);
-          }}
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          className="w-full p-2 border rounded"
         />
-      )}
-
-      <div className="mt-8 text-center text-gray-500">
-        This upload will be saved to:
-        <br />
-        • Bucket: <code className="bg-gray-800 px-2 rounded">test-uploads</code>
-        <br />
-        • Table: <code className="bg-gray-800 px-2 rounded">test_uploads</code>
-        <br />
-        • entityType: <code>test-page</code>, entityId: <code>1</code>
-      </div>
+        <button
+          type="submit"
+          disabled={uploading}
+          className="w-full bg-blue-600 text-white py-2 rounded disabled:opacity-70"
+        >
+          {uploading ? 'Uploading...' : 'Upload'}
+        </button>
+      </form>
+      {message && <p className="mt-4 text-center">{message}</p>}
     </div>
   );
 }
