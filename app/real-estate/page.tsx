@@ -21,11 +21,17 @@ import {
   Mail,
   Navigation,
   Home,
+  ChevronDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createClient } from '@supabase/supabase-js';
 import { useImageUpload } from '@/hooks/useImageUpload';
 
-// Define a mutable version of the property for local editing
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
 interface Property {
   id: number;
   title: string;
@@ -39,6 +45,7 @@ interface Property {
   rating: number;
   type: string;
   description: string;
+  created_at?: string;
 }
 
 const App = () => {
@@ -46,100 +53,8 @@ const App = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [scrolled, setScrolled] = useState(false);
-
-  // Mock property data (now treated as mutable for demo)
-  const [properties, setProperties] = useState<Property[]>([
-    {
-      id: 1,
-      title: 'Luxury Waterfront Villa',
-      location: 'Malibu, California',
-      price: '$8,500,000',
-      beds: 6,
-      baths: 8,
-      sqft: 12500,
-      image: 'https://placehold.co/600x400/1a1a2e/ffffff?text=Luxury+Villa',
-      featured: true,
-      rating: 4.9,
-      type: 'Villa',
-      description:
-        'Stunning oceanfront estate with panoramic views, private beach access, infinity pool, and smart home technology throughout.',
-    },
-    {
-      id: 2,
-      title: 'Modern Downtown Penthouse',
-      location: 'Manhattan, New York',
-      price: '$4,200,000',
-      beds: 3,
-      baths: 3,
-      sqft: 3200,
-      image: 'https://placehold.co/600x400/16213e/ffffff?text=Modern+Penthouse',
-      featured: true,
-      rating: 4.8,
-      type: 'Penthouse',
-      description:
-        'Contemporary penthouse featuring floor-to-ceiling windows, private rooftop terrace, and premium finishes throughout.',
-    },
-    {
-      id: 3,
-      title: 'Mountain Retreat Estate',
-      location: 'Aspen, Colorado',
-      price: '$6,800,000',
-      beds: 5,
-      baths: 6,
-      sqft: 8900,
-      image: 'https://placehold.co/600x400/0f3460/ffffff?text=Mountain+Estate',
-      featured: false,
-      rating: 4.7,
-      type: 'Estate',
-      description:
-        'Secluded mountain estate with ski-in/ski-out access, great room with stone fireplace, and expansive outdoor living spaces.',
-    },
-    {
-      id: 4,
-      title: 'Beachfront Condo Paradise',
-      location: 'Miami Beach, Florida',
-      price: '$2,950,000',
-      beds: 4,
-      baths: 4,
-      sqft: 3800,
-      image: 'https://placehold.co/600x400/533483/ffffff?text=Beachfront+Condo',
-      featured: true,
-      rating: 4.9,
-      type: 'Condo',
-      description:
-        'Luxury beachfront condominium with direct ocean access, resort-style amenities, and designer interiors.',
-    },
-    {
-      id: 5,
-      title: 'Historic Brownstone',
-      location: 'Brooklyn, New York',
-      price: '$3,750,000',
-      beds: 5,
-      baths: 4,
-      sqft: 4200,
-      image: 'https://placehold.co/600x400/e94560/ffffff?text=Historic+Brownstone',
-      featured: false,
-      rating: 4.6,
-      type: 'Brownstone',
-      description:
-        'Fully renovated historic brownstone featuring original architectural details, modern amenities, and private garden.',
-    },
-    {
-      id: 6,
-      title: 'Golf Course Mansion',
-      location: 'Scottsdale, Arizona',
-      price: '$5,200,000',
-      beds: 6,
-      baths: 7,
-      sqft: 9800,
-      image: 'https://placehold.co/600x400/f7b267/ffffff?text=Golf+Mansion',
-      featured: true,
-      rating: 4.8,
-      type: 'Mansion',
-      description:
-        'Mediterranean-style mansion overlooking championship golf course with resort-style pool, outdoor kitchen, and guest house.',
-    },
-  ]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [properties, setProperties] = useState<Property[]>([]);
 
   const stats = [
     { value: '12,500+', label: 'Properties Listed', icon: <Home className="w-6 h-6" /> },
@@ -148,12 +63,76 @@ const App = () => {
     { value: '$2.1B', label: 'Total Sales Volume', icon: <TrendingUp className="w-6 h-6" /> },
   ];
 
+  // Load properties from Supabase on mount
+  useEffect(() => {
+    const loadProperties = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('properties')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        setProperties(data || []);
+      } catch (err: any) {
+        console.error('Failed to load properties:', err.message);
+        alert('Failed to load properties. Check console for details.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProperties();
+  }, []);
+
+  // Handle search filter
   const filteredProperties = properties.filter(
     (property) =>
       property.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       property.location.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Update property image in DB and local state
+  const updatePropertyImage = async (propertyId: number, newImageUrl: string) => {
+    try {
+      const { error } = await supabase
+        .from('properties')
+        .update({ image: newImageUrl })
+        .eq('id', propertyId);
+
+      if (error) throw error;
+
+      setProperties(prev =>
+        prev.map(p => p.id === propertyId ? { ...p, image: newImageUrl } : p)
+      );
+
+      if (selectedProperty && selectedProperty.id === propertyId) {
+        setSelectedProperty({ ...selectedProperty, image: newImageUrl });
+      }
+
+      alert('Image updated successfully!');
+    } catch (err: any) {
+      alert(`Failed to save image: ${err.message}`);
+    }
+  };
+
+  // Replace image handler (called from modal)
+  const handleReplaceImage = async (propertyId: number, newImageUrl: string) => {
+    // Update local state immediately
+    setProperties(prev =>
+      prev.map(p => p.id === propertyId ? { ...p, image: newImageUrl } : p)
+    );
+    if (selectedProperty && selectedProperty.id === propertyId) {
+      setSelectedProperty({ ...selectedProperty, image: newImageUrl });
+    }
+
+    // Persist to database
+    await updatePropertyImage(propertyId, newImageUrl);
+  };
+
+  // Scroll effect for header
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
@@ -163,15 +142,13 @@ const App = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Handle image replacement in modal
-  const handleReplaceImage = (propertyId: number, newImageUrl: string) => {
-    setProperties((prev) =>
-      prev.map((p) => (p.id === propertyId ? { ...p, image: newImageUrl } : p))
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+        <div className="text-xl">Loading properties...</div>
+      </div>
     );
-    if (selectedProperty && selectedProperty.id === propertyId) {
-      setSelectedProperty({ ...selectedProperty, image: newImageUrl });
-    }
-  };
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -250,52 +227,71 @@ const App = () => {
         )}
       </AnimatePresence>
 
-      {/* Hero Section */}
-  <section 
-  className="relative h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-gray-900 via-black to-indigo-950"
-  style={{ paddingTop: '120px', paddingBottom: '80px' }}
->
-  <div className="absolute inset-0 bg-black/40"></div>
-  
-  <div className="text-center text-white z-10 max-w-4xl mx-auto px-4">
-    <motion.h1 
-      className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 leading-tight"
-      initial={{ opacity: 0, y: 30 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.8 }}
-    >
-      Find Your <span className="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Perfect</span> Home
-    </motion.h1>
-    
-    <motion.p
-      className="text-xl md:text-2xl font-medium text-gray-300 mb-8"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.2, duration: 0.6 }}
-    >
-      Premium Real Estate
-    </motion.p>
-    
-    <motion.div
-      className="flex items-center justify-center gap-2"
-      initial={{ opacity: 0, y: 30 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.4, duration: 0.6 }}
-    >
-      <div className="relative flex-1 max-w-md">
-        <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-        <input
-          type="text"
-          placeholder="Search by location, property type, or price..."
-          className="w-full py-3 pl-12 pr-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-        />
-      </div>
-      <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg hover:scale-105 transition-all">
-        Search
-      </button>
-    </motion.div>
-  </div>
-</section>
+      {/* Hero Section — With Faint Background Image */}
+      <section 
+        className="relative h-screen flex items-center justify-center overflow-hidden"
+        style={{
+          backgroundImage: `url('https://placehold.co/1920x1080/0f172a/ffffff?text=Premium+Real+Estate')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+        }}
+      >
+        {/* Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/80"></div>
+
+        {/* Content */}
+        <div className="relative z-10 text-center text-white max-w-4xl mx-auto px-4" style={{ paddingTop: '120px', paddingBottom: '80px' }}>
+          <motion.h1 
+            className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 leading-tight"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            Find Your <span className="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Perfect</span> Home
+          </motion.h1>
+          
+          <motion.p
+            className="text-xl md:text-2xl font-medium text-gray-300 mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.6 }}
+          >
+            Premium Real Estate
+          </motion.p>
+          
+          <motion.div
+            className="flex items-center justify-center gap-2"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 0.6 }}
+          >
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search by location, property type, or price..."
+                className="w-full py-3 pl-12 pr-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg hover:scale-105 transition-all">
+              Search
+            </button>
+          </motion.div>
+        </div>
+
+        {/* Scroll Down Indicator */}
+        <motion.div 
+          className="absolute bottom-8 left-1/2 transform -translate-x-1/2"
+          animate={{ y: [0, 10, 0] }}
+          transition={{ duration: 2, repeat: Infinity }}
+        >
+          <ChevronDown className="w-6 h-6 text-white/80" />
+        </motion.div>
+      </section>
+
       {/* Stats Section */}
       <section className="py-16 bg-white border-b border-gray-100">
         <div className="container mx-auto px-4">
@@ -608,7 +604,7 @@ const App = () => {
                   </span>
                 </div>
 
-                {/* ✨ UPLOAD ZONE OVERLAY (only in modal) */}
+                {/* UPLOAD ZONE OVERLAY */}
                 <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
                   <div className="flex items-center space-x-2 bg-white px-4 py-2 rounded-full font-medium text-gray-800">
                     <Camera className="w-4 h-4" />
@@ -616,7 +612,7 @@ const App = () => {
                   </div>
                 </div>
 
-                {/* Hidden Upload UI triggered by click */}
+                {/* Hidden Upload UI */}
                 <ReplaceImageButton
                   propertyId={selectedProperty.id}
                   currentImage={selectedProperty.image}
@@ -707,7 +703,6 @@ const ReplaceImageButton = ({ propertyId, currentImage, onReplace }: { propertyI
     setIsUploading(false);
   };
 
-  // Overlay click triggers file dialog
   return (
     <>
       <div
