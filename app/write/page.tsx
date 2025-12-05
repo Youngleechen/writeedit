@@ -1,19 +1,15 @@
 // app/write/page.tsx
 'use client';
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
 async function getCurrentUserId() {
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id || null;
 }
-
 // --- Types ---
 interface DraftListItem {
   id: string;
@@ -21,45 +17,38 @@ interface DraftListItem {
   updated_at?: string;
   lastEdited?: string;
 }
-
 interface FullDraft {
   id: string;
   title: string;
   content: string;
   updated_at?: string;
 }
-
 interface HistoryState {
   content: string;
   title: string;
   selection: SelectionState | null;
   timestamp: number;
 }
-
 interface SelectionState {
   startOffset: number;
   endOffset: number;
   startContainerPath: ElementPathStep[];
   endContainerPath: ElementPathStep[];
 }
-
 interface ElementPathStep {
   nodeType: number;
   nodeName: string;
   index: number;
 }
-
 const HISTORY_OPTIONS = {
   MAX_STATES: 100,
   THROTTLE_DELAY: 300,
 };
-
 const escapeHtml = (text: string): string => {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 };
-
 const formatTimeAgo = (date: Date): string => {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -71,9 +60,7 @@ const formatTimeAgo = (date: Date): string => {
   if (diffHr < 24) return `${diffHr} hr ago`;
   return date.toLocaleDateString();
 };
-
 const generateId = (): string => 'local_' + Math.random().toString(36).substring(2, 11);
-
 // --- Main Component ---
 export default function WritePage() {
   // --- Refs ---
@@ -85,7 +72,6 @@ export default function WritePage() {
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
   const mobileToolbarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
-
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -100,23 +86,19 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  
   // Mobile toolbar state
   const [isTextSelected, setIsTextSelected] = useState(false);
   const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
   const [isMobile, setIsMobile] = useState(false);
-
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 2500);
   }, []);
-
   const updateAutosaveStatus = (text: string, type: typeof autosaveStatusType) => {
     setAutosaveStatus(text);
     setAutosaveStatusType(type);
   };
-
   // --- Selection utils ---
   const saveCurrentSelection = () => {
     if (!canvasRef.current) return;
@@ -128,7 +110,6 @@ export default function WritePage() {
       }
     }
   };
-
   const restoreSavedSelection = (): boolean => {
     const range = currentSelectionRangeRef.current;
     if (!range || !canvasRef.current) return false;
@@ -142,7 +123,6 @@ export default function WritePage() {
       return false;
     }
   };
-
   const getElementPath = (element: Node, root: Node): ElementPathStep[] => {
     if (element === root) return [];
     const path: ElementPathStep[] = [];
@@ -165,7 +145,6 @@ export default function WritePage() {
     }
     return path;
   };
-
   const resolveElementPath = (path: ElementPathStep[], root: Node): Node | null => {
     if (path.length === 0) return root;
     let current: Node = root;
@@ -188,7 +167,6 @@ export default function WritePage() {
     }
     return current;
   };
-
   const saveSelectionState = (): SelectionState | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -203,7 +181,6 @@ export default function WritePage() {
       endContainerPath: getElementPath(range.endContainer, canvas),
     };
   };
-
   const restoreSelectionState = (state: SelectionState | null) => {
     if (!state || !canvasRef.current) return;
     const startContainer = resolveElementPath(state.startContainerPath, canvasRef.current);
@@ -224,7 +201,6 @@ export default function WritePage() {
       console.warn('Selection restore failed', e);
     }
   };
-
   // --- History ---
   const resetHistory = () => {
     setHistoryStack([]);
@@ -235,9 +211,7 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
   };
-
   const shouldCaptureHistory = () => !isApplyingHistory && !isAiOperation;
-
   const captureHistoryState = () => {
     if (!shouldCaptureHistory()) return;
     const now = Date.now();
@@ -246,18 +220,14 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = setTimeout(captureHistoryState, HISTORY_OPTIONS.THROTTLE_DELAY);
       return;
     }
-
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
     if (!canvas || !titleEl) return;
-
     const content = canvas.textContent || '';
     const title = titleEl.value || 'Untitled Draft';
     const selection = saveSelectionState();
-
     const lastState = historyStack[currentHistoryIndex];
     if (lastState && lastState.content === content && lastState.title === title) return;
-
     let newStack = historyStack.slice(0, currentHistoryIndex + 1);
     const newState: HistoryState = { content, title, selection, timestamp: now };
     newStack.push(newState);
@@ -265,7 +235,6 @@ export default function WritePage() {
       newStack = newStack.slice(1);
       setCurrentHistoryIndex(prev => prev - 1);
     }
-
     setHistoryStack(newStack);
     setCurrentHistoryIndex(newStack.length - 1);
     setLastHistoryTimestamp(now);
@@ -274,7 +243,6 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
   };
-
   const applyHistoryState = (state: HistoryState) => {
     if (!canvasRef.current || !titleRef.current) return;
     canvasRef.current.textContent = state.content;
@@ -283,7 +251,6 @@ export default function WritePage() {
     updateWordCount();
     updateAutosaveStatus('History restored', 'info');
   };
-
   const undo = () => {
     if (currentHistoryIndex <= 0 || historyStack.length === 0) {
       showToast('No more undo history', 'info');
@@ -295,7 +262,6 @@ export default function WritePage() {
     setIsApplyingHistory(false);
     showToast('Changes undone', 'success');
   };
-
   const redo = () => {
     if (currentHistoryIndex >= historyStack.length - 1) {
       showToast('No more redo history', 'info');
@@ -307,7 +273,6 @@ export default function WritePage() {
     setIsApplyingHistory(false);
     showToast('Changes redone', 'success');
   };
-
   // --- Word count ---
   const updateWordCount = () => {
     const canvas = canvasRef.current;
@@ -316,13 +281,11 @@ export default function WritePage() {
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     setWordCount(words);
   };
-
   // --- Local storage ---
   const getLocalDrafts = (): FullDraft[] => {
     const stored = localStorage.getItem('localDrafts');
     return stored ? JSON.parse(stored) : [];
   };
-
   const saveToLocalDrafts = (draft: FullDraft) => {
     const drafts = getLocalDrafts();
     const index = drafts.findIndex((d) => d.id === draft.id);
@@ -330,7 +293,6 @@ export default function WritePage() {
     else drafts.push(draft);
     localStorage.setItem('localDrafts', JSON.stringify(drafts));
   };
-
   // --- Supabase draft persistence ---
   const saveDraftToSupabase = async (content: string, title: string): Promise<string> => {
     const userId = await getCurrentUserId();
@@ -340,7 +302,6 @@ export default function WritePage() {
       showToast('Saved locally. Log in to sync.', 'info');
       return id;
     }
-
     const now = new Date().toISOString();
     const trimmedContent = content.trim();
     if (currentDraftId) {
@@ -364,23 +325,19 @@ export default function WritePage() {
     setIsDirty(false);
     return currentDraftId!;
   };
-
   const loadDraft = async (id: string) => {
     resetHistory();
     setIsApplyingHistory(true);
     setCurrentDraftId(id);
     currentSelectionRangeRef.current = null;
-
     const userId = await getCurrentUserId();
     let data: FullDraft | undefined = undefined;
-
     if (userId) {
       const { data: dbData, error } = await supabase
         .from('drafts')
         .select('*')
         .eq('id', id)
         .maybeSingle();
-
       if (error || !dbData) {
         showToast('Failed to load draft', 'error');
         setIsApplyingHistory(false);
@@ -401,7 +358,6 @@ export default function WritePage() {
         return;
       }
     }
-
     if (canvasRef.current) canvasRef.current.textContent = data.content || '';
     if (titleRef.current) titleRef.current.value = data.title;
     setIsDirty(false);
@@ -410,7 +366,6 @@ export default function WritePage() {
     captureHistoryState();
     setIsApplyingHistory(false);
   };
-
   const loadAllDrafts = async () => {
     const userId = await getCurrentUserId();
     let drafts: DraftListItem[] = [];
@@ -439,16 +394,13 @@ export default function WritePage() {
       }))
     );
   };
-
   // --- Save logic ---
   const manuallySave = async () => {
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
     if (!canvas || !titleEl) return;
-
     const content = canvas.textContent || '';
     const title = titleEl.value || 'Untitled Draft';
-
     if (!currentDraftId) {
       try {
         const id = await saveDraftToSupabase(content, title);
@@ -480,23 +432,19 @@ export default function WritePage() {
       }
     }
   };
-
   const autosave = async () => {
     if (!isDirty || !currentDraftId) return;
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
     if (!canvas || !titleEl) return;
-
     const content = canvas.textContent || '';
     const title = titleEl.value || 'Untitled Draft';
-
     const userId = await getCurrentUserId();
     if (!userId) {
       saveToLocalDrafts({ id: currentDraftId, title, content, updated_at: new Date().toISOString() });
       updateAutosaveStatus('Saved locally', 'saved');
       return;
     }
-
     updateAutosaveStatus('Saving…', 'saving');
     try {
       await saveDraftToSupabase(content, title);
@@ -509,13 +457,11 @@ export default function WritePage() {
       }, 3000);
     }
   };
-
   // --- Input handler ---
   const handleInput = () => {
     setIsDirty(true);
     updateWordCount();
     currentSelectionRangeRef.current = null;
-
     if (currentDraftId) {
       updateAutosaveStatus('Unsaved changes', 'unsaved');
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -527,7 +473,6 @@ export default function WritePage() {
       saveTimeoutRef.current = setTimeout(manuallySave, 500);
     }
   };
-
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -544,11 +489,9 @@ export default function WritePage() {
         redo();
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
-
   // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
@@ -562,7 +505,6 @@ export default function WritePage() {
     }
     return await res.json();
   };
-
   const showVariationPicker = (
     originalText: string,
     variations: string[],
@@ -574,7 +516,6 @@ export default function WritePage() {
       variationPickerRef.current.remove();
       variationPickerRef.current = null;
     }
-
     const modal = document.createElement('div');
     variationPickerRef.current = modal;
     modal.id = 'variation-picker-modal';
@@ -588,7 +529,6 @@ export default function WritePage() {
       padding-top: 80px;
       z-index: 10000;
     `;
-
     const picker = document.createElement('div');
     picker.style.cssText = `
       background: white;
@@ -603,7 +543,6 @@ export default function WritePage() {
       font-size: 1.05em;
       line-height: 1.6;
     `;
-
     picker.innerHTML = `
       <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
         <strong>Choose the best version</strong>
@@ -613,7 +552,6 @@ export default function WritePage() {
       <div style="background:#f9f9f9; padding:12px; border-radius:6px; margin-bottom:20px; font-style:italic;">${escapeHtml(originalText)}</div>
       <div id="variations-list"></div>
     `;
-
     const list = picker.querySelector('#variations-list')!;
     variations
       .map(t => t.trim())
@@ -638,21 +576,17 @@ export default function WritePage() {
         item.addEventListener('mouseleave', () => item.style.background = '');
         list.appendChild(item);
       });
-
     if (list.children.length === 0) {
       list.innerHTML = '<div style="color:#888;">No valid variations received.</div>';
     }
-
     picker.querySelector('#picker-cancel')!.addEventListener('click', () => {
       modal.remove();
       variationPickerRef.current = null;
       onCancel();
     });
-
     modal.appendChild(picker);
     document.body.appendChild(modal);
   };
-
   const insertTextAtCursor = (el: HTMLDivElement, text: string) => {
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
@@ -666,7 +600,6 @@ export default function WritePage() {
       el.textContent += text;
     }
   };
-
   const applyChosenText = (chosen: string, hadSelection: boolean, canvas: HTMLDivElement) => {
     if (hadSelection) {
       const sel = window.getSelection();
@@ -684,7 +617,6 @@ export default function WritePage() {
     }
     canvas.textContent = chosen;
   };
-
   // --- Handle AI Operations ---
   const handleGenerateSpark = async () => {
     if (!canvasRef.current || !titleRef.current) return;
@@ -695,7 +627,6 @@ export default function WritePage() {
     const prompt = isEmpty
       ? `You are a master storyteller. Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`
       : `You are a master storyteller. Based on the title "${title}", write ONLY ONE natural, flowing sentence that continues the narrative. DO NOT summarize, conclude, or add commentary. DO NOT use quotes, markdown, or JSON. Return ONLY the sentence, ending with a period.`;
-
     try {
       updateAutosaveStatus('✨ Generating spark...', 'saving');
       const data = await callAiApi({
@@ -703,22 +634,18 @@ export default function WritePage() {
         model: 'x-ai/grok-4.1-fast:free',
         editLevel: 'generate',
       });
-
       let text = data.generatedPost?.content || data.generatedPost || data.editedText || '';
-
       if (text.startsWith('{') && text.endsWith('}')) {
         try {
           const parsed = JSON.parse(text);
           text = parsed.excerpt || parsed.content || parsed.generatedPost || '';
         } catch {}
       }
-
       const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
       let sentence = firstSentenceMatch
         ? firstSentenceMatch[0]
         : (text.split('\n')[0] || 'A new beginning.').trim();
       if (!sentence.endsWith('.') && !sentence.endsWith('!') && !sentence.endsWith('?')) sentence += '.';
-
       setIsApplyingHistory(true);
       if (isEmpty) {
         canvasRef.current.textContent = sentence + ' ';
@@ -740,14 +667,11 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     }
   };
-
   const getSelectedOrFullText = (): { text: string; hasSelection: boolean } => {
     const canvas = canvasRef.current;
     if (!canvas) return { text: '', hasSelection: false };
-
     let selectedText = '';
     let hasSelection = false;
-
     if (restoreSavedSelection()) {
       selectedText = window.getSelection()?.toString().trim() || '';
       hasSelection = selectedText.length > 0;
@@ -756,14 +680,12 @@ export default function WritePage() {
       selectedText = selection?.toString().trim() || '';
       hasSelection = selectedText.length > 0;
     }
-
     const fullText = canvas.textContent.trim();
     return {
       text: hasSelection ? selectedText : fullText,
       hasSelection: hasSelection && selectedText.length > 0,
     };
   };
-
   const handleRewriteSelection = async () => {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!text) {
@@ -774,10 +696,8 @@ export default function WritePage() {
       showToast('Please select ≤50 words for best results', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('🧠 Generating rewrites...', 'saving');
       const data = await callAiApi({
@@ -787,13 +707,10 @@ export default function WritePage() {
         editLevel: 'rewrite',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       if (!variations.length) throw new Error('No output');
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -822,17 +739,14 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   const handleAdjustTone = async () => {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to adjust tone', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('🎭 Generating tones...', 'saving');
       const data = await callAiApi({
@@ -842,11 +756,9 @@ export default function WritePage() {
         editLevel: 'tone',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -875,7 +787,6 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   const handleExpandText = async () => {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
@@ -886,10 +797,8 @@ export default function WritePage() {
       showToast('Select ≤50 words to expand', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('📈 Generating expansions...', 'saving');
       const data = await callAiApi({
@@ -899,11 +808,9 @@ export default function WritePage() {
         editLevel: 'expand',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -932,7 +839,6 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   const handleCondenseText = async () => {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
@@ -943,10 +849,8 @@ export default function WritePage() {
       showToast('Text is too short to condense effectively', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('📉 Generating condensed versions...', 'saving');
       const data = await callAiApi({
@@ -956,11 +860,9 @@ export default function WritePage() {
         editLevel: 'condense',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -989,46 +891,38 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-
   // --- Mobile Toolbar Management ---
   const closeMobileToolbar = useCallback(() => {
     setIsTextSelected(false);
     setSelectionRect(null);
   }, []);
-
   const updateMobileSelection = useCallback(() => {
     if (!isMobile || !canvasRef.current) {
       closeMobileToolbar();
       return;
     }
-
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) {
       closeMobileToolbar();
       return;
     }
-
     const range = selection.getRangeAt(0);
     if (!canvasRef.current.contains(range.commonAncestorContainer)) {
       closeMobileToolbar();
       return;
     }
-
     const rect = range.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       closeMobileToolbar();
       return;
     }
-
     // Get header height if available
     const headerHeight = headerRef.current?.offsetHeight || 60;
-    
     // Calculate position ensuring it's visible
     let topPosition = rect.top - 60; // Toolbar height + gap
     if (topPosition < headerHeight + 10) {
       topPosition = headerHeight + 10;
     }
-
     setSelectionRect({
       ...rect,
       top: topPosition,
@@ -1037,26 +931,21 @@ export default function WritePage() {
     });
     setIsTextSelected(true);
   }, [isMobile, closeMobileToolbar]);
-
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth <= 768);
     };
-
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
   useEffect(() => {
     const handleSelectionChange = () => {
       updateMobileSelection();
     };
-
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => document.removeEventListener('selectionchange', handleSelectionChange);
   }, [updateMobileSelection]);
-
   useEffect(() => {
     if (isTextSelected && mobileToolbarRef.current) {
       const handleClickOutside = (e: MouseEvent) => {
@@ -1064,26 +953,22 @@ export default function WritePage() {
           closeMobileToolbar();
         }
       };
-      
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
   }, [isTextSelected, closeMobileToolbar]);
-
   // --- Initial load ---
   useEffect(() => {
     loadAllDrafts();
     resetHistory();
     captureHistoryState();
     updateWordCount();
-
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
       if (variationPickerRef.current) variationPickerRef.current.remove();
     };
   }, []);
-
   // --- Render UI ---
   return (
     <div className="writing-app">
@@ -1092,7 +977,6 @@ export default function WritePage() {
           .ai-controls-group {
             display: none !important;
           }
-          
           .mobile-ai-toolbar {
             position: fixed;
             left: 50%;
@@ -1110,11 +994,9 @@ export default function WritePage() {
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
           }
-          
           .mobile-ai-toolbar::-webkit-scrollbar {
             display: none;
           }
-          
           .mobile-toolbar-btn {
             background: none;
             border: none;
@@ -1128,17 +1010,14 @@ export default function WritePage() {
             align-items: center;
             gap: 4px;
           }
-          
           .mobile-toolbar-btn:hover {
             background: #f0f0f0;
           }
-          
           .mobile-toolbar-btn i {
             font-size: 18px;
           }
         }
       `}</style>
-
       {/* Sidebar */}
       <div className={`drafts-sidebar ${sidebarOpen ? 'active' : ''}`}>
         <div className="sidebar-header">
@@ -1186,7 +1065,6 @@ export default function WritePage() {
           )}
         </div>
       </div>
-
       {/* Main Writing Area */}
       <div className="writing-main">
         <div className="writing-header" ref={headerRef}>
@@ -1267,7 +1145,6 @@ export default function WritePage() {
           <span>{wordCount} words</span>
         </div>
       </div>
-
       {/* Mobile AI Toolbar - Only shown on mobile when text is selected */}
       {isMobile && isTextSelected && selectionRect && (
         <div
@@ -1282,8 +1159,8 @@ export default function WritePage() {
           <button 
             className="mobile-toolbar-btn" 
             onClick={() => {
-              closeMobileToolbar();
               handleGenerateSpark();
+              setTimeout(closeMobileToolbar, 300);
             }}
           >
             <span>✨</span> Spark
@@ -1291,8 +1168,8 @@ export default function WritePage() {
           <button 
             className="mobile-toolbar-btn" 
             onClick={() => {
-              closeMobileToolbar();
               handleRewriteSelection();
+              setTimeout(closeMobileToolbar, 300);
             }}
           >
             <span>🧠</span> Rewrite
@@ -1300,8 +1177,8 @@ export default function WritePage() {
           <button 
             className="mobile-toolbar-btn" 
             onClick={() => {
-              closeMobileToolbar();
               handleAdjustTone();
+              setTimeout(closeMobileToolbar, 300);
             }}
           >
             <span>🎭</span> Tone
@@ -1309,8 +1186,8 @@ export default function WritePage() {
           <button 
             className="mobile-toolbar-btn" 
             onClick={() => {
-              closeMobileToolbar();
               handleExpandText();
+              setTimeout(closeMobileToolbar, 300);
             }}
           >
             <span>📈</span> Expand
@@ -1318,15 +1195,14 @@ export default function WritePage() {
           <button 
             className="mobile-toolbar-btn" 
             onClick={() => {
-              closeMobileToolbar();
               handleCondenseText();
+              setTimeout(closeMobileToolbar, 300);
             }}
           >
             <span>📉</span> Condense
           </button>
         </div>
       )}
-
       {/* Toast */}
       {toast && (
         <div
