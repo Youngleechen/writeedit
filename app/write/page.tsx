@@ -98,16 +98,8 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  // --- Mobile Selection Toolbar State ---
-  const [selectionToolbar, setSelectionToolbar] = useState<{
-    visible: boolean;
-    text: string;
-    rect?: DOMRect;
-  }>({
-    visible: false,
-    text: '',
-  });
+  const [showSelectionToolbar, setShowSelectionToolbar] = useState(false);
+  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
 
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
@@ -531,44 +523,6 @@ export default function WritePage() {
     }
   };
 
-  // --- Mobile Selection Toolbar Logic ---
-  const updateSelectionToolbar = useCallback(() => {
-    if (typeof window === 'undefined' || !canvasRef.current) return;
-
-    const selection = window.getSelection();
-    const isMobile = window.innerWidth <= 768;
-
-    if (!isMobile || !selection || selection.isCollapsed) {
-      setSelectionToolbar((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      return;
-    }
-
-    const range = selection.getRangeAt(0);
-    if (!canvasRef.current.contains(range.commonAncestorContainer)) {
-      setSelectionToolbar((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      return;
-    }
-
-    const selectedText = selection.toString().trim();
-    if (!selectedText) {
-      setSelectionToolbar((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      return;
-    }
-
-    const rect = range.getBoundingClientRect();
-
-    setSelectionToolbar({
-      visible: true,
-      text: selectedText,
-      rect,
-    });
-  }, []);
-
-  const handleSelectionChange = () => {
-    saveCurrentSelection();
-    updateSelectionToolbar();
-  };
-
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -590,26 +544,6 @@ export default function WritePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
 
-  // --- Selection change listener ---
-  useEffect(() => {
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => document.removeEventListener('selectionchange', handleSelectionChange);
-  }, [updateSelectionToolbar]);
-
-  // --- Click-outside to hide toolbar ---
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (!selectionToolbar.visible) return;
-      const toolbar = document.querySelector('[style*="zIndex: 10000"]');
-      if (toolbar && !toolbar.contains(e.target as Node)) {
-        setSelectionToolbar({ visible: false, text: '' });
-      }
-    };
-
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [selectionToolbar.visible]);
-
   // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
@@ -630,6 +564,7 @@ export default function WritePage() {
     onChoose: (text: string) => void,
     onCancel: () => void
   ) => {
+    // Close existing
     if (variationPickerRef.current) {
       variationPickerRef.current.remove();
       variationPickerRef.current = null;
@@ -693,6 +628,7 @@ export default function WritePage() {
           modal.remove();
           variationPickerRef.current = null;
           onChoose(text);
+          setShowSelectionToolbar(false);
         });
         item.addEventListener('mouseenter', () => item.style.background = '#f0f7ff');
         item.addEventListener('mouseleave', () => item.style.background = '');
@@ -707,6 +643,7 @@ export default function WritePage() {
       modal.remove();
       variationPickerRef.current = null;
       onCancel();
+      setShowSelectionToolbar(false);
     });
 
     modal.appendChild(picker);
@@ -828,16 +765,17 @@ export default function WritePage() {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!text) {
       showToast('No text to rewrite', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
     if (hasSelection && text.split(' ').length > 50) {
       showToast('Please select ≤50 words for best results', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
 
     captureHistoryState();
     setIsAiOperation(true);
-    setSelectionToolbar({ visible: false, text: '' }); // Hide toolbar
 
     try {
       updateAutosaveStatus('🧠 Generating rewrites...', 'saving');
@@ -856,7 +794,6 @@ export default function WritePage() {
       if (!variations.length) throw new Error('No output');
 
       showVariationPicker(text, variations, (chosen) => {
-        setSelectionToolbar({ visible: false, text: '' });
         if (canvasRef.current) {
           const canvas = canvasRef.current;
           canvas.focus();
@@ -872,7 +809,6 @@ export default function WritePage() {
         }
         currentSelectionRangeRef.current = null;
       }, () => {
-        setSelectionToolbar({ visible: false, text: '' });
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
       });
@@ -880,10 +816,10 @@ export default function WritePage() {
       console.error('Rewrite failed:', err);
       showToast('Rewrite failed – try again', 'error');
       updateAutosaveStatus('Rewrite failed', 'error');
-      setSelectionToolbar({ visible: false, text: '' });
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
+      setShowSelectionToolbar(false);
     }
   };
 
@@ -891,12 +827,12 @@ export default function WritePage() {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to adjust tone', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
 
     captureHistoryState();
     setIsAiOperation(true);
-    setSelectionToolbar({ visible: false, text: '' });
 
     try {
       updateAutosaveStatus('🎭 Generating tones...', 'saving');
@@ -913,7 +849,6 @@ export default function WritePage() {
         : [data.editedText || data.generatedPost].filter(Boolean);
 
       showVariationPicker(text, variations, (chosen) => {
-        setSelectionToolbar({ visible: false, text: '' });
         if (canvasRef.current) {
           const canvas = canvasRef.current;
           canvas.focus();
@@ -929,7 +864,6 @@ export default function WritePage() {
         }
         currentSelectionRangeRef.current = null;
       }, () => {
-        setSelectionToolbar({ visible: false, text: '' });
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
       });
@@ -937,10 +871,10 @@ export default function WritePage() {
       console.error('Tone failed:', err);
       showToast('Tone adjustment failed – try again', 'error');
       updateAutosaveStatus('Tone failed', 'error');
-      setSelectionToolbar({ visible: false, text: '' });
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
+      setShowSelectionToolbar(false);
     }
   };
 
@@ -948,16 +882,17 @@ export default function WritePage() {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to expand', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
     if (text.split(' ').length > 50) {
       showToast('Select ≤50 words to expand', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
 
     captureHistoryState();
     setIsAiOperation(true);
-    setSelectionToolbar({ visible: false, text: '' });
 
     try {
       updateAutosaveStatus('📈 Generating expansions...', 'saving');
@@ -974,7 +909,6 @@ export default function WritePage() {
         : [data.editedText || data.generatedPost].filter(Boolean);
 
       showVariationPicker(text, variations, (chosen) => {
-        setSelectionToolbar({ visible: false, text: '' });
         if (canvasRef.current) {
           const canvas = canvasRef.current;
           canvas.focus();
@@ -990,7 +924,6 @@ export default function WritePage() {
         }
         currentSelectionRangeRef.current = null;
       }, () => {
-        setSelectionToolbar({ visible: false, text: '' });
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
       });
@@ -998,10 +931,10 @@ export default function WritePage() {
       console.error('Expand failed:', err);
       showToast('Expansion failed – try again', 'error');
       updateAutosaveStatus('Expansion failed', 'error');
-      setSelectionToolbar({ visible: false, text: '' });
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
+      setShowSelectionToolbar(false);
     }
   };
 
@@ -1009,16 +942,17 @@ export default function WritePage() {
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to condense', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
     if (text.split(' ').length < 15) {
       showToast('Text is too short to condense effectively', 'info');
+      setShowSelectionToolbar(false);
       return;
     }
 
     captureHistoryState();
     setIsAiOperation(true);
-    setSelectionToolbar({ visible: false, text: '' });
 
     try {
       updateAutosaveStatus('📉 Generating condensed versions...', 'saving');
@@ -1035,7 +969,6 @@ export default function WritePage() {
         : [data.editedText || data.generatedPost].filter(Boolean);
 
       showVariationPicker(text, variations, (chosen) => {
-        setSelectionToolbar({ visible: false, text: '' });
         if (canvasRef.current) {
           const canvas = canvasRef.current;
           canvas.focus();
@@ -1051,7 +984,6 @@ export default function WritePage() {
         }
         currentSelectionRangeRef.current = null;
       }, () => {
-        setSelectionToolbar({ visible: false, text: '' });
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
       });
@@ -1059,12 +991,41 @@ export default function WritePage() {
       console.error('Condense failed:', err);
       showToast('Condensation failed – try again', 'error');
       updateAutosaveStatus('Condensation failed', 'error');
-      setSelectionToolbar({ visible: false, text: '' });
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
+      setShowSelectionToolbar(false);
     }
   };
+
+  // --- Mobile selection toolbar handler ---
+  useEffect(() => {
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (!isTouchDevice) return;
+
+    const handleSelectionChange = () => {
+      if (isAiOperation || isApplyingHistory) return;
+
+      const selection = window.getSelection();
+      const canvas = canvasRef.current;
+      if (!selection || !canvas) return;
+
+      const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+      const hasSelection = range && !range.collapsed && canvas.contains(range.commonAncestorContainer);
+
+      if (hasSelection && range) {
+        const rect = range.getBoundingClientRect();
+        setSelectionRect(rect);
+        setShowSelectionToolbar(true);
+        saveCurrentSelection();
+      } else {
+        setShowSelectionToolbar(false);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [isAiOperation, isApplyingHistory]);
 
   // --- Initial load ---
   useEffect(() => {
@@ -1203,9 +1164,9 @@ export default function WritePage() {
           className="writing-canvas"
           data-placeholder="Start writing your masterpiece…"
           onInput={handleInput}
-          onSelect={handleSelectionChange}
-          onTouchEnd={handleSelectionChange}
-          onMouseUp={handleSelectionChange}
+          onSelect={saveCurrentSelection}
+          onTouchEnd={saveCurrentSelection}
+          onMouseUp={saveCurrentSelection}
         ></div>
         <div className="writing-footer">
           <span>{wordCount} words</span>
@@ -1213,49 +1174,43 @@ export default function WritePage() {
       </div>
 
       {/* Mobile Selection AI Toolbar */}
-      {selectionToolbar.visible && selectionToolbar.rect && (
+      {showSelectionToolbar && selectionRect && (
         <div
           style={{
             position: 'fixed',
-            left: `${Math.max(8, selectionToolbar.rect.left)}px`,
-            top: `${Math.max(8, selectionToolbar.rect.top - 120)}px`,
-            width: `min(${typeof window !== 'undefined' ? window.innerWidth - 16 : 300}px, ${selectionToolbar.rect.width}px)`,
+            left: `${selectionRect.left + window.scrollX + selectionRect.width / 2}px`,
+            top: `${selectionRect.top + window.scrollY - 50}px`,
+            transform: 'translateX(-50%)',
             backgroundColor: 'white',
-            borderRadius: '12px',
-            padding: '12px',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-            zIndex: 10000,
-            maxWidth: '100vw',
+            borderRadius: '24px',
+            padding: '6px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 1001,
+            display: 'flex',
+            gap: '8px',
+            whiteSpace: 'nowrap',
           }}
         >
-          <div
-            style={{
-              fontSize: '0.9em',
-              color: '#555',
-              marginBottom: '10px',
-              fontStyle: 'italic',
-              maxHeight: '60px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'pre-wrap',
-            }}
+          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleRewriteSelection}>
+            🧠 Rewrite
+          </button>
+          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleAdjustTone}>
+            🎭 Tone
+          </button>
+          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleExpandText}>
+            📈 Expand
+          </button>
+          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleCondenseText}>
+            📉 Condense
+          </button>
+          <button
+            className="btn"
+            style={{ fontSize: '1.2em', padding: '4px 8px' }}
+            onClick={() => setShowSelectionToolbar(false)}
+            title="Close"
           >
-            “{escapeHtml(selectionToolbar.text)}”
-          </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button className="btn ai-btn" style={{ flex: 1, minWidth: '60px' }} onClick={handleRewriteSelection}>
-              🧠
-            </button>
-            <button className="btn ai-btn" style={{ flex: 1, minWidth: '60px' }} onClick={handleAdjustTone}>
-              🎭
-            </button>
-            <button className="btn ai-btn" style={{ flex: 1, minWidth: '60px' }} onClick={handleExpandText}>
-              📈
-            </button>
-            <button className="btn ai-btn" style={{ flex: 1, minWidth: '60px' }} onClick={handleCondenseText}>
-              📉
-            </button>
-          </div>
+            ✕
+          </button>
         </div>
       )}
 
