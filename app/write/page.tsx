@@ -1125,20 +1125,18 @@ export default function WritePage() {
           </div>
         </div>
         <div
-          ref={canvasRef}
-          contentEditable
-          className="writing-canvas"
-          data-placeholder="Start writing your masterpiece…"
-          onInput={handleInput}
-          onSelect={saveCurrentSelection}
-          onTouchEnd={saveCurrentSelection}
-          onMouseUp={saveCurrentSelection}
-          // 🔥 Prevent immediate blur on mobile tap
-          onBlur={(e) => {
-            // Do NOT clear selection on blur — let button handlers use it
-            // We clear it only on input or AI use
-          }}
-        ></div>
+  ref={canvasRef}
+  contentEditable
+  className="writing-canvas"
+  data-placeholder="Start writing your masterpiece…"
+  onInput={handleInput}
+  onSelect={saveCurrentSelection}
+  onMouseUp={saveCurrentSelection}
+  onTouchEnd={saveCurrentSelection}
+  onPointerUp={saveCurrentSelection} // ← ADD THIS (works on iOS/Android)
+  onFocus={saveCurrentSelection}     // ← ADD THIS (captures on focus-in)
+  onBlur={(e) => { /* do nothing */ }}
+></div>
         <div className="writing-footer">
           <span>{wordCount} words</span>
         </div>
