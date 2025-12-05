@@ -70,7 +70,7 @@ export default function WritePage() {
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
-  const selectionModalRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -85,66 +85,54 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [selectionModalVisible, setSelectionModalVisible] = useState(false);
-  const [selectedText, setSelectedText] = useState('');
-  
+  const [selectionToolbarVisible, setSelectionToolbarVisible] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState({ top: 0, left: 0 });
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 2500);
   }, []);
-  
   const updateAutosaveStatus = (text: string, type: typeof autosaveStatusType) => {
     setAutosaveStatus(text);
     setAutosaveStatusType(type);
   };
-  
   // --- Selection utils ---
-  const getSelectedText = (): string => {
-    if (!canvasRef.current) return '';
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return '';
-    const range = selection.getRangeAt(0);
-    if (!canvasRef.current.contains(range.commonAncestorContainer)) return '';
-    return range.toString().trim();
-  };
-  
   const saveCurrentSelection = () => {
     if (!canvasRef.current) return;
-    
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
-      const text = range.toString().trim();
-      
-      // Only show modal for actual text selections (not cursor placement)
-      if (text.length > 0 && canvasRef.current.contains(range.commonAncestorContainer)) {
+      const selectedText = range.toString().trim();
+      // Only show toolbar for actual selections (not cursor placement)
+      if (canvasRef.current.contains(range.commonAncestorContainer) && selectedText.length > 0) {
         currentSelectionRangeRef.current = range.cloneRange();
-        setSelectedText(text);
-        showSelectionModal();
+        showSelectionToolbar(range);
         return;
       }
     }
-    hideSelectionModal();
+    hideSelectionToolbar();
   };
-  
-  const showSelectionModal = () => {
-    // Hide any existing variation pickers
-    if (variationPickerRef.current) {
-      variationPickerRef.current.remove();
-      variationPickerRef.current = null;
+  const showSelectionToolbar = (range: Range) => {
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      hideSelectionToolbar();
+      return;
     }
-    setSelectionModalVisible(true);
+    // Dismiss keyboard on mobile when toolbar appears
+    if (canvasRef.current) {
+      canvasRef.current.blur();
+    }
+    const toolbarHeight = 60;
+    const top = window.scrollY + rect.top - toolbarHeight - 12;
+    const left = window.scrollX + rect.left + rect.width / 2 - 150; // half of ~300px width
+    setToolbarPosition({ top: Math.max(10, top), left });
+    setSelectionToolbarVisible(true);
   };
-  
-  const hideSelectionModal = () => {
-    if (selectionModalVisible) {
-      setSelectionModalVisible(false);
-      setSelectedText('');
-      currentSelectionRangeRef.current = null;
+  const hideSelectionToolbar = () => {
+    if (selectionToolbarVisible) {
+      setSelectionToolbarVisible(false);
     }
   };
-  
   const restoreSavedSelection = (): boolean => {
     const range = currentSelectionRangeRef.current;
     if (!range || !canvasRef.current) return false;
@@ -158,7 +146,6 @@ export default function WritePage() {
       return false;
     }
   };
-  
   const getElementPath = (element: Node, root: Node): ElementPathStep[] => {
     if (element === root) return [];
     const path: ElementPathStep[] = [];
@@ -181,7 +168,6 @@ export default function WritePage() {
     }
     return path;
   };
-  
   const resolveElementPath = (path: ElementPathStep[], root: Node): Node | null => {
     if (path.length === 0) return root;
     let current: Node = root;
@@ -204,7 +190,6 @@ export default function WritePage() {
     }
     return current;
   };
-  
   const saveSelectionState = (): SelectionState | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -219,7 +204,6 @@ export default function WritePage() {
       endContainerPath: getElementPath(range.endContainer, canvas),
     };
   };
-  
   const restoreSelectionState = (state: SelectionState | null) => {
     if (!state || !canvasRef.current) return;
     const startContainer = resolveElementPath(state.startContainerPath, canvasRef.current);
@@ -240,7 +224,6 @@ export default function WritePage() {
       console.warn('Selection restore failed', e);
     }
   };
-  
   // --- History ---
   const resetHistory = () => {
     setHistoryStack([]);
@@ -251,9 +234,7 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
   };
-  
   const shouldCaptureHistory = () => !isApplyingHistory && !isAiOperation;
-  
   const captureHistoryState = () => {
     if (!shouldCaptureHistory()) return;
     const now = Date.now();
@@ -285,7 +266,6 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
   };
-  
   const applyHistoryState = (state: HistoryState) => {
     if (!canvasRef.current || !titleRef.current) return;
     canvasRef.current.textContent = state.content;
@@ -294,7 +274,6 @@ export default function WritePage() {
     updateWordCount();
     updateAutosaveStatus('History restored', 'info');
   };
-  
   const undo = () => {
     if (currentHistoryIndex <= 0 || historyStack.length === 0) {
       showToast('No more undo history', 'info');
@@ -306,7 +285,6 @@ export default function WritePage() {
     setIsApplyingHistory(false);
     showToast('Changes undone', 'success');
   };
-  
   const redo = () => {
     if (currentHistoryIndex >= historyStack.length - 1) {
       showToast('No more redo history', 'info');
@@ -318,7 +296,6 @@ export default function WritePage() {
     setIsApplyingHistory(false);
     showToast('Changes redone', 'success');
   };
-  
   // --- Word count ---
   const updateWordCount = () => {
     const canvas = canvasRef.current;
@@ -327,13 +304,11 @@ export default function WritePage() {
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     setWordCount(words);
   };
-  
   // --- Local storage ---
   const getLocalDrafts = (): FullDraft[] => {
     const stored = localStorage.getItem('localDrafts');
     return stored ? JSON.parse(stored) : [];
   };
-  
   const saveToLocalDrafts = (draft: FullDraft) => {
     const drafts = getLocalDrafts();
     const index = drafts.findIndex((d) => d.id === draft.id);
@@ -341,7 +316,6 @@ export default function WritePage() {
     else drafts.push(draft);
     localStorage.setItem('localDrafts', JSON.stringify(drafts));
   };
-  
   // --- Supabase draft persistence ---
   const saveDraftToSupabase = async (content: string, title: string): Promise<string> => {
     const userId = await getCurrentUserId();
@@ -374,7 +348,6 @@ export default function WritePage() {
     setIsDirty(false);
     return currentDraftId!;
   };
-  
   const loadDraft = async (id: string) => {
     resetHistory();
     setIsApplyingHistory(true);
@@ -416,7 +389,6 @@ export default function WritePage() {
     captureHistoryState();
     setIsApplyingHistory(false);
   };
-  
   const loadAllDrafts = async () => {
     const userId = await getCurrentUserId();
     let drafts: DraftListItem[] = [];
@@ -445,7 +417,6 @@ export default function WritePage() {
       }))
     );
   };
-  
   // --- Save logic ---
   const manuallySave = async () => {
     const canvas = canvasRef.current;
@@ -484,7 +455,6 @@ export default function WritePage() {
       }
     }
   };
-  
   const autosave = async () => {
     if (!isDirty || !currentDraftId) return;
     const canvas = canvasRef.current;
@@ -510,13 +480,12 @@ export default function WritePage() {
       }, 3000);
     }
   };
-  
   // --- Input handler ---
   const handleInput = () => {
     setIsDirty(true);
     updateWordCount();
     currentSelectionRangeRef.current = null;
-    hideSelectionModal();
+    hideSelectionToolbar();
     if (currentDraftId) {
       updateAutosaveStatus('Unsaved changes', 'unsaved');
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -528,7 +497,6 @@ export default function WritePage() {
       saveTimeoutRef.current = setTimeout(manuallySave, 500);
     }
   };
-  
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -544,15 +512,10 @@ export default function WritePage() {
         e.preventDefault();
         redo();
       }
-      // Escape key to close selection modal
-      if (e.key === 'Escape') {
-        hideSelectionModal();
-      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDirty, currentDraftId, selectionModalVisible]);
-  
+  }, [isDirty, currentDraftId]);
   // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
@@ -566,14 +529,13 @@ export default function WritePage() {
     }
     return await res.json();
   };
-  
   const showVariationPicker = (
     originalText: string,
     variations: string[],
     onChoose: (text: string) => void,
     onCancel: () => void
   ) => {
-    hideSelectionModal();
+    hideSelectionToolbar();
     if (variationPickerRef.current) {
       variationPickerRef.current.remove();
       variationPickerRef.current = null;
@@ -649,7 +611,6 @@ export default function WritePage() {
     modal.appendChild(picker);
     document.body.appendChild(modal);
   };
-  
   const insertTextAtCursor = (el: HTMLDivElement, text: string) => {
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
@@ -663,7 +624,23 @@ export default function WritePage() {
       el.textContent += text;
     }
   };
-  
+  const applyChosenText = (chosen: string, hadSelection: boolean, canvas: HTMLDivElement) => {
+    if (hadSelection) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        if (!range.collapsed) {
+          range.deleteContents();
+          range.insertNode(document.createTextNode(chosen));
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+      }
+    }
+    canvas.textContent = chosen;
+  };
   // --- Handle AI Operations ---
   const handleGenerateSpark = async () => {
     if (!canvasRef.current || !titleRef.current) return;
@@ -712,12 +689,19 @@ export default function WritePage() {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      hideSelectionModal();
+      hideSelectionToolbar();
     }
   };
-  
+  const getSelectedText = (): string => {
+    if (!canvasRef.current) return '';
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return '';
+    const range = selection.getRangeAt(0);
+    if (!canvasRef.current.contains(range.commonAncestorContainer)) return '';
+    return range.toString().trim();
+  };
   const handleRewriteSelection = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('No text selected', 'info');
       return;
@@ -728,7 +712,6 @@ export default function WritePage() {
     }
     captureHistoryState();
     setIsAiOperation(true);
-    hideSelectionModal();
     try {
       updateAutosaveStatus('🧠 Generating rewrites...', 'saving');
       const data = await callAiApi({
@@ -780,16 +763,14 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-  
   const handleAdjustTone = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('Select text to adjust tone', 'info');
       return;
     }
     captureHistoryState();
     setIsAiOperation(true);
-    hideSelectionModal();
     try {
       updateAutosaveStatus('🎨 Generating tones...', 'saving');
       const data = await callAiApi({
@@ -802,6 +783,7 @@ export default function WritePage() {
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
+      if (!variations.length) throw new Error('No output');
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -823,7 +805,7 @@ export default function WritePage() {
           captureHistoryState();
           setIsDirty(true);
           updateWordCount();
-          updateAutosaveStatus('Rewritten!', 'saved');
+          updateAutosaveStatus('Tone adjusted!', 'saved');
           showToast('✅ Tone Adjusted!', 'success');
         }
         currentSelectionRangeRef.current = null;
@@ -840,9 +822,8 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-  
   const handleExpandText = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('Select text to expand', 'info');
       return;
@@ -853,7 +834,6 @@ export default function WritePage() {
     }
     captureHistoryState();
     setIsAiOperation(true);
-    hideSelectionModal();
     try {
       updateAutosaveStatus('📏 Generating expansions...', 'saving');
       const data = await callAiApi({
@@ -866,6 +846,7 @@ export default function WritePage() {
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
+      if (!variations.length) throw new Error('No output');
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -887,7 +868,7 @@ export default function WritePage() {
           captureHistoryState();
           setIsDirty(true);
           updateWordCount();
-          updateAutosaveStatus('Rewritten!', 'saved');
+          updateAutosaveStatus('Expanded!', 'saved');
           showToast('✅ Text Expanded!', 'success');
         }
         currentSelectionRangeRef.current = null;
@@ -904,9 +885,8 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-  
   const handleCondenseText = async () => {
-    const text = selectedText;
+    const text = getSelectedText();
     if (!text) {
       showToast('Select text to condense', 'info');
       return;
@@ -917,7 +897,6 @@ export default function WritePage() {
     }
     captureHistoryState();
     setIsAiOperation(true);
-    hideSelectionModal();
     try {
       updateAutosaveStatus('📉 Generating condensed versions...', 'saving');
       const data = await callAiApi({
@@ -930,6 +909,7 @@ export default function WritePage() {
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
+      if (!variations.length) throw new Error('No output');
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -951,7 +931,7 @@ export default function WritePage() {
           captureHistoryState();
           setIsDirty(true);
           updateWordCount();
-          updateAutosaveStatus('Rewritten!', 'saved');
+          updateAutosaveStatus('Condensed!', 'saved');
           showToast('✅ Text Condensed!', 'success');
         }
         currentSelectionRangeRef.current = null;
@@ -968,27 +948,32 @@ export default function WritePage() {
       setIsAiOperation(false);
     }
   };
-  
   // --- Blur/close handling ---
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
-        selectionModalRef.current && 
-        !selectionModalRef.current.contains(e.target as Node) &&
-        !selectionModalVisible
+        toolbarRef.current &&
+        !toolbarRef.current.contains(e.target as Node) &&
+        canvasRef.current &&
+        !canvasRef.current.contains(e.target as Node)
       ) {
-        hideSelectionModal();
+        hideSelectionToolbar();
       }
     };
-    
     const handleScroll = () => {
-      // Hide modal on scroll for better UX
-      hideSelectionModal();
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const selectedText = range.toString().trim();
+        if (selectedText.length > 0 && canvasRef.current?.contains(range.commonAncestorContainer)) {
+          showSelectionToolbar(range);
+          return;
+        }
+      }
+      hideSelectionToolbar();
     };
-    
     document.addEventListener('click', handleClickOutside);
     window.addEventListener('scroll', handleScroll, { passive: true });
-    
     return () => {
       document.removeEventListener('click', handleClickOutside);
       window.removeEventListener('scroll', handleScroll);
@@ -996,8 +981,7 @@ export default function WritePage() {
       if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
       if (variationPickerRef.current) variationPickerRef.current.remove();
     };
-  }, [selectionModalVisible]);
-  
+  }, [selectionToolbarVisible]);
   // --- Initial load ---
   useEffect(() => {
     loadAllDrafts();
@@ -1005,7 +989,6 @@ export default function WritePage() {
     captureHistoryState();
     updateWordCount();
   }, []);
-  
   // --- Render UI ---
   return (
     <div className="writing-app">
@@ -1056,7 +1039,6 @@ export default function WritePage() {
           )}
         </div>
       </div>
-      
       {/* Main Writing Area */}
       <div className="writing-main">
         <div className="writing-header">
@@ -1116,180 +1098,120 @@ export default function WritePage() {
           <span>{wordCount} words</span>
         </div>
       </div>
-      
-      {/* Selection Modal - SQUARE POPUP WITH LABELS */}
-      {selectionModalVisible && (
+      {/* Selection Toolbar (Mobile/Any) */}
+      {selectionToolbarVisible && (
         <div
+          ref={toolbarRef}
           style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            top: `${toolbarPosition.top}px`,
+            left: `${toolbarPosition.left}px`,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
+            gap: '8px',
+            padding: '8px 12px',
+            background: '#1e1e1e',
+            borderRadius: '16px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            zIndex: 1001,
+            transform: 'translateX(-50%)',
+            maxWidth: '300px',
+            width: 'max-content',
           }}
-          onClick={hideSelectionModal}
         >
-          <div
-            ref={selectionModalRef}
+          <button
+            className="toolbar-btn"
+            aria-label="Rewrite text"
             style={{
-              backgroundColor: 'white',
-              borderRadius: '16px',
-              padding: '24px',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-              maxWidth: '400px',
-              width: '90%',
-              textAlign: 'center',
-              transform: 'translateY(-20px)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'white',
+              padding: '6px',
+              fontSize: '1.1em',
+              cursor: 'pointer',
+              width: '50px',
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRewriteSelection();
+            }}
           >
-            <h3 style={{ 
-              margin: '0 0 16px 0', 
-              fontSize: '1.2rem',
-              color: '#333',
-              fontWeight: 500
-            }}>
-              What would you like to do?
-            </h3>
-            
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: '16px',
-              marginBottom: '24px'
-            }}>
-              {/* Rewrite Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRewriteSelection();
-                }}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  background: '#f8f9fa',
-                  border: '1px solid #ddd',
-                  borderRadius: '12px',
-                  padding: '16px 12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
-              >
-                <span style={{ fontSize: '1.4rem', marginBottom: '6px' }}>🧠</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Rewrite</span>
-              </button>
-              
-              {/* Tone Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAdjustTone();
-                }}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  background: '#f8f9fa',
-                  border: '1px solid #ddd',
-                  borderRadius: '12px',
-                  padding: '16px 12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
-              >
-                <span style={{ fontSize: '1.4rem', marginBottom: '6px' }}>🎨</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Tone</span>
-              </button>
-              
-              {/* Expand Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleExpandText();
-                }}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  background: '#f8f9fa',
-                  border: '1px solid #ddd',
-                  borderRadius: '12px',
-                  padding: '16px 12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
-              >
-                <span style={{ fontSize: '1.4rem', marginBottom: '6px' }}>📏</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Expand</span>
-              </button>
-              
-              {/* Condense Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCondenseText();
-                }}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  background: '#f8f9fa',
-                  border: '1px solid #ddd',
-                  borderRadius: '12px',
-                  padding: '16px 12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
-              >
-                <span style={{ fontSize: '1.4rem', marginBottom: '6px' }}>📉</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Condense</span>
-              </button>
-            </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'center',
-              borderTop: '1px solid #eee',
-              paddingTop: '16px'
-            }}>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  hideSelectionModal();
-                }}
-                style={{
-                  background: '#e9ecef',
-                  border: '1px solid #ddd',
-                  borderRadius: '8px',
-                  padding: '8px 20px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#dee2e6'}
-                onMouseLeave={(e) => e.currentTarget.style.background = '#e9ecef'}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+            🧠
+            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Rewrite</span>
+          </button>
+          <button
+            className="toolbar-btn"
+            aria-label="Adjust tone"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'white',
+              padding: '6px',
+              fontSize: '1.1em',
+              cursor: 'pointer',
+              width: '50px',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAdjustTone();
+            }}
+          >
+            🎨
+            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Tone</span>
+          </button>
+          <button
+            className="toolbar-btn"
+            aria-label="Expand text"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'white',
+              padding: '6px',
+              fontSize: '1.1em',
+              cursor: 'pointer',
+              width: '50px',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleExpandText();
+            }}
+          >
+            📏
+            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Expand</span>
+          </button>
+          <button
+            className="toolbar-btn"
+            aria-label="Condense text"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'white',
+              padding: '6px',
+              fontSize: '1.1em',
+              cursor: 'pointer',
+              width: '50px',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCondenseText();
+            }}
+          >
+            📉
+            <span style={{ fontSize: '0.65em', marginTop: '2px' }}>Condense</span>
+          </button>
         </div>
       )}
-      
       {/* Toast */}
       {toast && (
         <div
