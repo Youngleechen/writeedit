@@ -62,24 +62,25 @@ export default function TestImagePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // Insert or replace test post (only one needed for demo)
-      const { error: upsertErr } = await supabase
+      // Delete any existing test post for this user
+      await supabase
         .from('blog_posts')
-        .upsert(
-          {
-            user_id: userId,
-            title: 'Test Image Upload',
-            content: 'This is a test post for image upload.',
-            image_url: imageUrl,
-            published: false,
-          },
-          {
-            onConflict: 'user_id,title', // assumes unique(user_id, title)
-            ignoreDuplicates: false,
-          }
-        );
+        .delete()
+        .eq('user_id', userId)
+        .eq('title', 'Test Image Upload');
 
-      if (upsertErr) throw upsertErr;
+      // Insert new test post
+      const { error: insertErr } = await supabase
+        .from('blog_posts')
+        .insert({
+          user_id: userId,
+          title: 'Test Image Upload',
+          content: 'This is a test post for image upload.',
+          image_url: imageUrl,
+          published: false,
+        });
+
+      if (insertErr) throw insertErr;
 
       setPreview(imageUrl);
       setStatus('✅ Uploaded and saved to blog_posts + blog-images!');
