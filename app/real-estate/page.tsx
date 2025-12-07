@@ -15,20 +15,33 @@ export default function TestImagePage() {
   const [status, setStatus] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // 1. Get current user session on mount
+  // Fetch user session and latest image on mount
   useEffect(() => {
-    const getSession = async () => {
+    const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      setUserId(session?.user.id || null);
-      
-      // 2. Restore preview from sessionStorage if exists
-      const savedPreview = sessionStorage.getItem('testImagePreview');
-      if (savedPreview) {
-        setPreview(savedPreview);
+      const uid = session?.user.id;
+      setUserId(uid || null);
+
+      if (uid) {
+        // Fetch the latest test image post for this user
+        const { data, error } = await supabase
+          .from('blog_posts')
+          .select('image_url')
+          .eq('user_id', uid)
+          .eq('title', 'Test Image Upload')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Failed to fetch latest image:', error);
+        } else if (data?.image_url) {
+          setPreview(data.image_url);
+        }
       }
     };
-    
-    getSession();
+
+    init();
   }, []);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -39,40 +52,40 @@ export default function TestImagePage() {
     setStatus(null);
 
     try {
-      // 3. Use userId from state instead of refetching session
       const filePath = `blog/${userId}/${Date.now()}_${file.name}`;
-      
-      // 4. Fixed upload syntax and error handling
       const { error: uploadErr } = await supabase.storage
         .from('blog-images')
         .upload(filePath, file, { upsert: false });
 
       if (uploadErr) throw uploadErr;
 
-      // 5. Fixed public URL retrieval
-      const { data } = supabase.storage
-        .from('blog-images')
-        .getPublicUrl(filePath);
-      
+      const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // 6. Save to database
-      const { error: insertErr } = await supabase
+      // Insert or replace test post (only one needed for demo)
+      const { error: upsertErr } = await supabase
         .from('blog_posts')
-        .insert({
-          user_id: userId,
-          title: 'Test Image Upload',
-          content: 'This is a test post for image upload.',
-          image_url: imageUrl,
-          published: false,
-        });
+        .upsert(
+          {
+            user_id: userId,
+            title: 'Test Image Upload',
+            content: 'This is a test post for image upload.',
+            image_url: imageUrl,
+            published: false,
+          },
+          {
+            onConflict: 'user_id,title', // assumes unique(user_id, title)
+            ignoreDuplicates: false,
+          }
+        );
 
-      if (insertErr) throw insertErr;
+      if (upsertErr) throw upsertErr;
 
-      // 7. Persist preview in session storage
       setPreview(imageUrl);
-      sessionStorage.setItem('testImagePreview', imageUrl);
       setStatus('✅ Uploaded and saved to blog_posts + blog-images!');
+
+      // Optional: clear file input
+      e.target.value = '';
     } catch (err: any) {
       console.error(err);
       setStatus(`❌ Error: ${err.message}`);
@@ -80,14 +93,6 @@ export default function TestImagePage() {
       setUploading(false);
     }
   };
-
-  // 8. Clear preview when user logs out
-  useEffect(() => {
-    if (!userId) {
-      setPreview(null);
-      sessionStorage.removeItem('testImagePreview');
-    }
-  }, [userId]);
 
   return (
     <div className="max-w-md mx-auto p-6 mt-10">
@@ -105,19 +110,28 @@ export default function TestImagePage() {
         </div>
       )}
 
-      {/* 9. Disable input when no user or uploading */}
-      <input
-        type="file"
-        accept="image/*"
-        onChange={handleUpload}
-        disabled={uploading || !userId}
-        className="w-full mb-2"
-      />
+      {userId ? (
+        <input
+          type="file"
+          accept="image/*"
+          onChange={handleUpload}
+          disabled={uploading}
+          className="w-full mb-2"
+        />
+      ) : (
+        <p className="text-red-600">You must be logged in to upload.</p>
+      )}
+
       {uploading && <p>Uploading...</p>}
-      {status && <p className={status.startsWith('✅') ? 'text-green-600' : 'text-red-600'}>{status}</p>}
-      
+      {status && (
+        <p className={status.startsWith('✅') ? 'text-green-600' : 'text-red-600'}>
+          {status}
+        </p>
+      )}
+
       <p className="text-sm text-gray-500 mt-4">
-        This will create a test draft in your <code>blog_posts</code> table and upload to <code>blog-images</code>.
+        This will create/update a test draft in your <code>blog_posts</code> table
+        and upload to <code>blog-images</code>.
       </p>
     </div>
   );
