@@ -121,89 +121,108 @@ const App = () => {
     { value: '$2.1B', label: 'Total Sales Volume', icon: <TrendingUp className="w-6 h-6" /> },
   ];
 
-  // Initialize properties from blog_posts (auto-creates if missing)
-  useEffect(() => {
-    const initializeProperties = async () => {
-      setIsLoading(true);
-      try {
-        const { data: existing, error: fetchError } = await supabase
-          .from('blog_posts')
-          .select('id, title, content, image_url, user_id, type')
-          .eq('type', 'property');
+  // Define metadata shape for type safety
+interface PropertyMetadata {
+  description?: string;
+  location?: string;
+  price?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  featured?: boolean;
+  rating?: number;
+  type?: string;
+}
 
-        if (fetchError) throw fetchError;
+// Initialize properties from blog_posts (auto-creates if missing)
+useEffect(() => {
+  const initializeProperties = async () => {
+    setIsLoading(true);
+    try {
+      const { data: existing, error: fetchError } = await supabase
+        .from('blog_posts')
+        .select('id, title, content, image_url, user_id, type')
+        .eq('type', 'property');
 
-        if (existing && existing.length > 0) {
-          // Hydrate from real DB — parse content for extra fields
-          const hydrated = existing.map(row => {
-            let meta = {};
+      if (fetchError) throw fetchError;
+
+      if (existing && existing.length > 0) {
+        // Hydrate from real DB — parse content as JSON if possible
+        const hydrated = existing.map(row => {
+          let meta: PropertyMetadata = {};
+
+          if (row.content) {
             try {
-              // Try to parse content as JSON if it starts with { or [
-              if (row.content?.startsWith('{') || row.content?.startsWith('[')) {
-                meta = JSON.parse(row.content);
+              // Only attempt JSON parsing if it looks like an object
+              if (row.content.trim().startsWith('{')) {
+                meta = JSON.parse(row.content) as PropertyMetadata;
               } else {
-                // Fallback: treat content as plain description
+                // Plain text → treat as description only
                 meta = { description: row.content };
               }
             } catch (e) {
+              // JSON parse failed → fallback to plain description
               meta = { description: row.content };
             }
+          }
 
-            return {
-              id: row.id,
-              title: row.title,
-              location: meta.location || '',
-              price: meta.price || '',
-              beds: meta.beds || 0,
-              baths: meta.baths || 0,
-              sqft: meta.sqft || 0,
-              featured: meta.featured || false,
-              rating: meta.rating || 0,
-              type: meta.type || 'Property',
-              description: meta.description || '',
-              image: row.image_url || '',
-            };
-          });
-          setProperties(hydrated);
-        } else {
-          // Seed with mock data (images are empty by design)
-          const blogRecords = MOCK_PROPERTIES.map(p => ({
-            id: p.id,
-            title: p.title,
-            content: JSON.stringify({
-              description: p.description,
-              location: p.location,
-              price: p.price,
-              beds: p.beds,
-              baths: p.baths,
-              sqft: p.sqft,
-              featured: p.featured,
-              rating: p.rating,
-              type: p.type,
-            }),
-            image_url: p.image, // empty string
-            published: true,
-            user_id: 'system',
-            type: 'property',
-          }));
+          return {
+            id: row.id,
+            title: row.title,
+            location: meta.location || '',
+            price: meta.price || '',
+            beds: meta.beds || 0,
+            baths: meta.baths || 0,
+            sqft: meta.sqft || 0,
+            featured: meta.featured || false,
+            rating: meta.rating || 0,
+            type: meta.type || 'Property',
+            description: meta.description || '',
+            image: row.image_url || '',
+          };
+        });
 
-          const { error: upsertError } = await supabase
-            .from('blog_posts')
-            .upsert(blogRecords, { onConflict: 'id' });
+        setProperties(hydrated);
+      } else {
+        // Seed with mock data (images are empty by design)
+        const blogRecords = MOCK_PROPERTIES.map(p => ({
+          id: p.id,
+          title: p.title,
+          content: JSON.stringify({
+            description: p.description,
+            location: p.location,
+            price: p.price,
+            beds: p.beds,
+            baths: p.baths,
+            sqft: p.sqft,
+            featured: p.featured,
+            rating: p.rating,
+            type: p.type,
+          }),
+          image_url: p.image, // empty string
+          published: true,
+          user_id: 'system',
+          type: 'property',
+        }));
 
-          if (upsertError) throw upsertError;
-          setProperties(MOCK_PROPERTIES);
-        }
-      } catch (err: any) {
-        console.error('Failed to initialize properties:', err);
-        alert('Failed to load properties. Check console.');
-      } finally {
-        setIsLoading(false);
+        const { error: upsertError } = await supabase
+          .from('blog_posts')
+          .upsert(blogRecords, { onConflict: 'id' });
+
+        if (upsertError) throw upsertError;
+
+        setProperties(MOCK_PROPERTIES);
       }
-    };
+    } catch (err: any) {
+      console.error('Failed to initialize properties:', err);
+      alert('Failed to load properties. Check console.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    initializeProperties();
-  }, []);
+  initializeProperties();
+}, []);
 
   const filteredProperties = properties.filter(
     (property) =>
