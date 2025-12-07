@@ -1,4 +1,4 @@
-// app/test-image/page.tsx
+// app/properties/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -9,36 +9,51 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function TestImagePage() {
-  const [preview, setPreview] = useState<string | null>(null);
+export default function RealEstatePage() {
+  const [properties, setProperties] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  // Fetch user session and latest image on mount
+  // Fetch user and properties on mount
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user.id;
       setUserId(uid || null);
+      setIsAdmin(uid ? true : false); // In real app: check role via claims
 
       if (uid) {
-        // Fetch the latest test image post for this user
+        // Fetch all property listings (blog posts with real-estate-like titles)
         const { data, error } = await supabase
           .from('blog_posts')
-          .select('image_url')
-          .eq('user_id', uid)
-          .eq('title', 'Test Image Upload')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .select('*')
+          .order('created_at', { ascending: false });
 
-        if (error) {
-          console.error('Failed to fetch latest image:', error);
-        } else if (data?.image_url) {
-          setPreview(data.image_url);
+        if (!error) {
+          // Filter only "property-like" entries (you can add a tag later)
+          const estates = (data || []).filter(post =>
+            post.title.toLowerCase().includes('estate') ||
+            post.title.toLowerCase().includes('villa') ||
+            post.title.toLowerCase().includes('luxury') ||
+            post.title.toLowerCase().includes('property')
+          );
+          setProperties(estates);
+        }
+      } else {
+        // Fetch public listings only
+        const { data, error } = await supabase
+          .from('blog_posts')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error) {
+          setProperties(data || []);
         }
       }
+
+      setLoading(false);
     };
 
     init();
@@ -49,10 +64,10 @@ export default function TestImagePage() {
     if (!file || !userId) return;
 
     setUploading(true);
-    setStatus(null);
-
     try {
-      const filePath = `blog/${userId}/${Date.now()}_${file.name}`;
+      const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '-')}`;
+      const filePath = `blog/${userId}/${fileName}`;
+      
       const { error: uploadErr } = await supabase.storage
         .from('blog-images')
         .upload(filePath, file, { upsert: false });
@@ -62,78 +77,132 @@ export default function TestImagePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // Delete any existing test post for this user
-      await supabase
-        .from('blog_posts')
-        .delete()
-        .eq('user_id', userId)
-        .eq('title', 'Test Image Upload');
-
-      // Insert new test post
+      // Insert new property listing
       const { error: insertErr } = await supabase
         .from('blog_posts')
         .insert({
           user_id: userId,
-          title: 'Test Image Upload',
-          content: 'This is a test post for image upload.',
+          title: `Luxury Villa ${Math.floor(100 + Math.random() * 900)}`,
+          content: 'Breathtaking ocean views, infinity pool, smart home, private chef kitchen, and 24/7 concierge. Your dream estate awaits.',
           image_url: imageUrl,
-          published: false,
+          published: true,
         });
 
       if (insertErr) throw insertErr;
 
-      setPreview(imageUrl);
-      setStatus('✅ Uploaded and saved to blog_posts + blog-images!');
-
-      // Optional: clear file input
-      e.target.value = '';
+      // Refresh list
+      const { data: freshData } = await supabase
+        .from('blog_posts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setProperties(freshData || []);
     } catch (err: any) {
-      console.error(err);
-      setStatus(`❌ Error: ${err.message}`);
+      alert(`❌ Upload failed: ${err.message}`);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 
-  return (
-    <div className="max-w-md mx-auto p-6 mt-10">
-      <h1 className="text-2xl font-bold mb-4">ImageContext Test</h1>
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-emerald-900 flex items-center justify-center">
+        <div className="text-white text-xl">Discovering Estates...</div>
+      </div>
+    );
+  }
 
-      {preview ? (
-        <img
-          src={preview}
-          alt="Uploaded"
-          className="w-full h-48 object-contain border mb-4"
-        />
-      ) : (
-        <div className="w-full h-48 bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 mb-4">
-          No image uploaded
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-emerald-50">
+      {/* Hero Banner */}
+      <div className="relative w-full h-[60vh] md:h-[70vh] overflow-hidden">
+        {properties[0]?.image_url ? (
+          <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${properties[0].image_url})` }}>
+            <div className="absolute inset-0 bg-black/40"></div>
+            <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
+              <h1 className="text-3xl md:text-5xl font-bold drop-shadow-lg">{properties[0].title}</h1>
+              <p className="mt-2 text-lg drop-shadow">{properties[0].content.substring(0, 100)}...</p>
+              <button className="mt-4 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full transition shadow-lg">
+                Explore This Estate
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-r from-emerald-700 to-teal-800 flex items-center justify-center">
+            <div className="text-center text-white">
+              <h1 className="text-4xl font-bold">Luxury Estates Await</h1>
+              <p className="mt-2 text-xl">Where dreams find their address.</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Admin Upload (Floating Button) */}
+      {isAdmin && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <label className="block bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-full shadow-xl cursor-pointer transition transform hover:scale-105">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleUpload}
+              disabled={uploading}
+              className="hidden"
+            />
+          </label>
         </div>
       )}
 
-      {userId ? (
-        <input
-          type="file"
-          accept="image/*"
-          onChange={handleUpload}
-          disabled={uploading}
-          className="w-full mb-2"
-        />
-      ) : (
-        <p className="text-red-600">You must be logged in to upload.</p>
-      )}
+      {/* Property Grid */}
+      <div className="container mx-auto px-4 py-12">
+        <h2 className="text-3xl font-bold text-center mb-12 text-slate-800">Featured Estates</h2>
+        
+        {properties.length === 0 ? (
+          <div className="text-center py-12 text-slate-500">
+            No properties listed yet. {isAdmin && 'Add your first luxury estate!'}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+            {properties.map((property, idx) => (
+              <div
+                key={property.id}
+                className="bg-white rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition duration-300 transform hover:-translate-y-1"
+              >
+                {property.image_url ? (
+                  <div className="h-64 bg-cover bg-center" style={{ backgroundImage: `url(${property.image_url})` }} />
+                ) : (
+                  <div className="h-64 bg-gradient-to-r from-emerald-400 to-teal-500 flex items-center justify-center">
+                    <span className="text-white text-lg font-bold">No Image</span>
+                  </div>
+                )}
+                <div className="p-5">
+                  <h3 className="text-xl font-bold text-slate-800">{property.title}</h3>
+                  <p className="mt-2 text-slate-600 line-clamp-3">{property.content}</p>
+                  <button className="mt-4 w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-semibold rounded-lg transition">
+                    View Details →
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-      {uploading && <p>Uploading...</p>}
-      {status && (
-        <p className={status.startsWith('✅') ? 'text-green-600' : 'text-red-600'}>
-          {status}
-        </p>
-      )}
-
-      <p className="text-sm text-gray-500 mt-4">
-        This will create/update a test draft in your <code>blog_posts</code> table
-        and upload to <code>blog-images</code>.
-      </p>
+      {/* Global Styles */}
+      <style jsx global>{`
+        body {
+          margin: 0;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .line-clamp-3 {
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+      `}</style>
     </div>
   );
 }
