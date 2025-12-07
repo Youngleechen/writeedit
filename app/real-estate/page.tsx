@@ -72,162 +72,176 @@ const App = () => {
     init();
   }, []);
 
-  // Initialize properties from blog_posts
-  useEffect(() => {
-    const initializeProperties = async () => {
-      setIsLoading(true);
-      
-      try {
-        // First, check if any property-type blog_posts already exist
-        const { data: existing, error: fetchError } = await supabase
-          .from('blog_posts')
-          .select('id, title, content, image_url, user_id, type, metadata')
-          .eq('type', 'property');
+  // Define a safe metadata type
+interface PropertyMetadata {
+  location?: string;
+  price?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  featured?: boolean;
+  rating?: number;
+  type?: string;
+}
 
-        if (fetchError) throw fetchError;
+useEffect(() => {
+  const initializeProperties = async () => {
+    setIsLoading(true);
+    
+    try {
+      const { data: existing, error: fetchError } = await supabase
+        .from('blog_posts')
+        .select('id, title, content, image_url, user_id, type, metadata')
+        .eq('type', 'property');
 
-        if (existing && existing.length > 0) {
-          // Hydrate from real data
-          const hydrated = existing.map(row => {
-            // Parse metadata if stored as JSON string
-            let metadata = {};
+      if (fetchError) throw fetchError;
+
+      if (existing && existing.length > 0) {
+        const hydrated = existing.map(row => {
+          let metadata: PropertyMetadata = {};
+          if (row.metadata) {
             try {
-              metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata || {};
-            } catch (e) {}
+              metadata = typeof row.metadata === 'string'
+                ? JSON.parse(row.metadata)
+                : (row.metadata as PropertyMetadata);
+            } catch (e) {
+              console.warn('Failed to parse metadata for property:', row.id);
+            }
+          }
 
-            return {
-              id: row.id,
-              title: row.title,
-              location: metadata.location || '',
-              price: metadata.price || '',
-              beds: metadata.beds || 0,
-              baths: metadata.baths || 0,
-              sqft: metadata.sqft || 0,
-              featured: metadata.featured || false,
-              rating: metadata.rating || 0,
-              type: metadata.type || 'Unknown',
-              description: row.content || '',
-              image: row.image_url || '',
-            };
-          });
+          return {
+            id: row.id,
+            title: row.title,
+            location: metadata.location || '',
+            price: metadata.price || '',
+            beds: metadata.beds || 0,
+            baths: metadata.baths || 0,
+            sqft: metadata.sqft || 0,
+            featured: metadata.featured ?? false,
+            rating: metadata.rating || 0,
+            type: metadata.type || 'Unknown',
+            description: row.content || '',
+            image: row.image_url || '',
+          };
+        });
 
-          setProperties(hydrated);
-          setIsLoading(false);
-          return;
-        }
-
-        // ❌ No data exists → seed with mock data
-        const mockProperties: Property[] = [
-          {
-            id: '1',
-            title: 'Oceanfront Villa',
-            location: 'Malibu, CA',
-            price: '$8.5M',
-            beds: 5,
-            baths: 6,
-            sqft: 7500,
-            featured: true,
-            rating: 4.9,
-            type: 'Villa',
-            description: 'Stunning ocean views, infinity pool, private beach access, and smart home automation.',
-            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Oceanfront+Villa'
-          },
-          {
-            id: '2',
-            title: 'Mountain Luxury Estate',
-            location: 'Aspen, CO',
-            price: '$12.3M',
-            beds: 6,
-            baths: 7,
-            sqft: 9200,
-            featured: true,
-            rating: 4.8,
-            type: 'Estate',
-            description: 'Private ski-in/ski-out access, heated garage, wine cellar, and panoramic mountain views.',
-            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Mountain+Estate'
-          },
-          {
-            id: '3',
-            title: 'Downtown Penthouse',
-            location: 'New York, NY',
-            price: '$6.8M',
-            beds: 4,
-            baths: 5,
-            sqft: 5800,
-            featured: false,
-            rating: 4.7,
-            type: 'Penthouse',
-            description: 'Floor-to-ceiling windows, rooftop terrace, concierge service, and skyline views.',
-            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Downtown+Penthouse'
-          },
-          {
-            id: '4',
-            title: 'Desert Oasis Mansion',
-            location: 'Scottsdale, AZ',
-            price: '$5.2M',
-            beds: 5,
-            baths: 5,
-            sqft: 6500,
-            featured: false,
-            rating: 4.6,
-            type: 'Mansion',
-            description: 'Infinity pool, outdoor kitchen, meditation garden, and desert sunset views.',
-            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Desert+Oasis'
-          },
-          {
-            id: '5',
-            title: 'Forest Canopy Sanctuary',
-            location: 'Portland, OR',
-            price: '$3.9M',
-            beds: 4,
-            baths: 4,
-            sqft: 5200,
-            featured: false,
-            rating: 4.5,
-            type: 'Sanctuary',
-            description: 'Treehouse-style living, natural wood finishes, wildlife viewing deck, and privacy.',
-            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Forest+Sanctuary'
-          },
-        ];
-
-        // Insert mock data into blog_posts
-        const blogRecords = mockProperties.map(p => ({
-          id: p.id,
-          title: p.title,
-          content: p.description,
-          image_url: p.image,
-          published: true,
-          user_id: 'system',
-          type: 'property',
-          metadata: JSON.stringify({
-            location: p.location,
-            price: p.price,
-            beds: p.beds,
-            baths: p.baths,
-            sqft: p.sqft,
-            featured: p.featured,
-            rating: p.rating,
-            type: p.type,
-          }),
-        }));
-
-        const { error: upsertError } = await supabase
-          .from('blog_posts')
-          .upsert(blogRecords, { onConflict: 'id' });
-
-        if (upsertError) throw upsertError;
-
-        setProperties(mockProperties);
-      } catch (err: any) {
-        console.error('Failed to initialize properties:', err);
-        alert('Failed to load properties. Check console.');
-      } finally {
+        setProperties(hydrated);
         setIsLoading(false);
+        return;
       }
-    };
 
-    initializeProperties();
-  }, []);
+      // ✅ STILL HERE: Your mock placeholder data
+      const mockProperties: Property[] = [
+        {
+          id: '1',
+          title: 'Oceanfront Villa',
+          location: 'Malibu, CA',
+          price: '$8.5M',
+          beds: 5,
+          baths: 6,
+          sqft: 7500,
+          featured: true,
+          rating: 4.9,
+          type: 'Villa',
+          description: 'Stunning ocean views, infinity pool, private beach access, and smart home automation.',
+          image: 'https://placehold.co/800x600/0f172a/ffffff?text=Oceanfront+Villa'
+        },
+        {
+          id: '2',
+          title: 'Mountain Luxury Estate',
+          location: 'Aspen, CO',
+          price: '$12.3M',
+          beds: 6,
+          baths: 7,
+          sqft: 9200,
+          featured: true,
+          rating: 4.8,
+          type: 'Estate',
+          description: 'Private ski-in/ski-out access, heated garage, wine cellar, and panoramic mountain views.',
+          image: 'https://placehold.co/800x600/0f172a/ffffff?text=Mountain+Estate'
+        },
+        {
+          id: '3',
+          title: 'Downtown Penthouse',
+          location: 'New York, NY',
+          price: '$6.8M',
+          beds: 4,
+          baths: 5,
+          sqft: 5800,
+          featured: false,
+          rating: 4.7,
+          type: 'Penthouse',
+          description: 'Floor-to-ceiling windows, rooftop terrace, concierge service, and skyline views.',
+          image: 'https://placehold.co/800x600/0f172a/ffffff?text=Downtown+Penthouse'
+        },
+        {
+          id: '4',
+          title: 'Desert Oasis Mansion',
+          location: 'Scottsdale, AZ',
+          price: '$5.2M',
+          beds: 5,
+          baths: 5,
+          sqft: 6500,
+          featured: false,
+          rating: 4.6,
+          type: 'Mansion',
+          description: 'Infinity pool, outdoor kitchen, meditation garden, and desert sunset views.',
+          image: 'https://placehold.co/800x600/0f172a/ffffff?text=Desert+Oasis'
+        },
+        {
+          id: '5',
+          title: 'Forest Canopy Sanctuary',
+          location: 'Portland, OR',
+          price: '$3.9M',
+          beds: 4,
+          baths: 4,
+          sqft: 5200,
+          featured: false,
+          rating: 4.5,
+          type: 'Sanctuary',
+          description: 'Treehouse-style living, natural wood finishes, wildlife viewing deck, and privacy.',
+          image: 'https://placehold.co/800x600/0f172a/ffffff?text=Forest+Sanctuary'
+        },
+      ];
+
+      // Insert mock data
+      const blogRecords = mockProperties.map(p => ({
+        id: p.id,
+        title: p.title,
+        content: p.description,
+        image_url: p.image,
+        published: true,
+        user_id: 'system',
+        type: 'property',
+        metadata: JSON.stringify({
+          location: p.location,
+          price: p.price,
+          beds: p.beds,
+          baths: p.baths,
+          sqft: p.sqft,
+          featured: p.featured,
+          rating: p.rating,
+          type: p.type,
+        }),
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('blog_posts')
+        .upsert(blogRecords, { onConflict: 'id' });
+
+      if (upsertError) throw upsertError;
+
+      setProperties(mockProperties);
+    } catch (err: any) {
+      console.error('Failed to initialize properties:', err);
+      alert('Failed to load properties. Check console.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  initializeProperties();
+}, []);
 
   const filteredProperties = properties.filter(
     (property) =>
