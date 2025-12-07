@@ -1,222 +1,795 @@
-// app/properties/page.tsx
+// app/real-estate/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import {
+  Search,
+  MapPin,
+  Camera,
+  Bed,
+  Bath,
+  Square,
+  ChevronRight,
+  Star,
+  Heart,
+  Menu,
+  X,
+  Users,
+  Award,
+  TrendingUp,
+  Phone,
+  Mail,
+  Navigation,
+  Home,
+  ChevronDown,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@supabase/supabase-js';
+import { useImageUpload } from '@/hooks/useImageUpload';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function RealEstateShowcase() {
-  const [properties, setProperties] = useState<any[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
+// Extend your local property type
+interface Property {
+  id: string;
+  title: string;
+  location: string;
+  price: string;
+  beds: number;
+  baths: number;
+  sqft: number;
+  image: string; // this will be updated from DB
+  featured: boolean;
+  rating: number;
+  type: string;
+  description: string;
+}
 
-  // Fetch user and properties on mount
-  useEffect(() => {
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUserId(session?.user.id || null);
+const App = () => {
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [scrolled, setScrolled] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [properties, setProperties] = useState<Property[]>([]);
 
-      // Fetch all blog posts (your "properties")
-      const { data, error } = await supabase
+  const stats = [
+    { value: '12,500+', label: 'Properties Listed', icon: <Home className="w-6 h-6" /> },
+    { value: '8,900+', label: 'Happy Clients', icon: <Users className="w-6 h-6" /> },
+    { value: '98%', label: 'Client Satisfaction', icon: <Star className="w-6 h-6" /> },
+    { value: '$2.1B', label: 'Total Sales Volume', icon: <TrendingUp className="w-6 h-6" /> },
+  ];
+
+  // Initialize properties from blog_posts (auto-creates if missing)
+ useEffect(() => {
+  const initializeProperties = async () => {
+    setIsLoading(true);
+    
+    try {
+      // First, check if any property-type blog_posts already exist
+      const { data: existing, error: fetchError } = await supabase
         .from('blog_posts')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('id, title, content, image_url, user_id, type')
+        .eq('type', 'property');
 
-      if (!error) {
-        setProperties(data || []);
+      if (fetchError) throw fetchError;
+
+      if (existing && existing.length > 0) {
+        // ✅ Database already seeded — hydrate from real data
+        const hydrated = existing.map(row => ({
+          id: row.id,
+          title: row.title,
+          location: '', // ⚠️ You’ll need to store location, beds, etc. in DB too!
+          price: '',
+          beds: 0,
+          baths: 0,
+          sqft: 0,
+          featured: false,
+          rating: 0,
+          type: 'Unknown',
+          description: row.content || '',
+          image: row.image_url || '',
+        }));
+
+        // ❗ But wait: your mock data includes beds, price, etc. — currently NOT in DB!
+        setProperties(hydrated);
+        setIsLoading(false);
+        return;
       }
+
+      // ❌ No data exists → seed with mock data
+      const mockProperties: Property[] = [ /* your list */ ];
+
+      const blogRecords = mockProperties.map(p => ({
+        id: p.id,
+        title: p.title,
+        content: p.description,
+        image_url: p.image,
+        published: true,
+        user_id: 'system',
+        type: 'property',
+        // ❗ Add missing fields to DB if you want full persistence!
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('blog_posts')
+        .upsert(blogRecords, { onConflict: 'id' });
+
+      if (upsertError) throw upsertError;
+
+      // Use mock data as fallback
+      setProperties(mockProperties);
+    } catch (err: any) {
+      console.error('Failed to initialize properties:', err);
+      alert('Failed to load properties. Check console.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  initializeProperties();
+}, []);
+
+  const filteredProperties = properties.filter(
+    (property) =>
+      property.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      property.location.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Handle image replacement — saves to blog_posts
+  const handleReplaceImage = async (propertyId: string, newImageUrl: string) => {
+    // Update local state immediately
+    setProperties(prev =>
+      prev.map(p => p.id === propertyId ? { ...p, image: newImageUrl } : p)
+    );
+
+    if (selectedProperty && selectedProperty.id === propertyId) {
+      setSelectedProperty({ ...selectedProperty, image: newImageUrl });
+    }
+
+    // Save to Supabase
+    const { error } = await supabase
+      .from('blog_posts')
+      .update({ image_url: newImageUrl })
+      .eq('id', propertyId)
+      .eq('type', 'property');
+
+    if (error) {
+      alert(`Failed to save image: ${error.message}`);
+    }
+    // Success: image will persist on refresh
+  };
+
+  // Scroll effect for header
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 50);
     };
 
-    init();
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+        <div className="text-xl">Loading properties...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header 
+        id="header" 
+        className={`fixed top-0 w-full z-50 transition-all duration-300 ${
+          scrolled ? 'bg-white shadow-lg py-2' : 'bg-transparent py-4'
+        }`}
+      >
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-between">
+            <motion.div 
+              className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5 }}
+            >
+              LuxEstate
+            </motion.div>
+            
+            <nav className="hidden md:flex space-x-8">
+              {['Home', 'Properties', 'Agents', 'About', 'Contact'].map((item, index) => (
+                <motion.a
+                  key={item}
+                  href="#" 
+                  className={`font-medium transition-colors ${
+                    scrolled 
+                      ? 'text-gray-700 hover:text-blue-600' 
+                      : 'text-white hover:text-blue-300'
+                  }`}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: index * 0.1 }}
+                >
+                  {item}
+                </motion.a>
+              ))}
+            </nav>
+
+            <div className="flex items-center space-x-4">
+              <button className="hidden md:block bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-full font-medium hover:shadow-lg transition-all hover:scale-105">
+                List Property
+              </button>
+              <button 
+                className="md:hidden text-white"
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+              >
+                {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Mobile Menu */}
+      <AnimatePresence>
+        {isMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="md:hidden bg-white shadow-lg"
+          >
+            <div className="container mx-auto px-4 py-4 space-y-4">
+              {['Home', 'Properties', 'Agents', 'About', 'Contact'].map((item) => (
+                <a key={item} href="#" className="block text-gray-700 hover:text-blue-600 font-medium">
+                  {item}
+                </a>
+              ))}
+              <button className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-full font-medium">
+                List Your Property
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Hero Section — With Faint Background Image */}
+      <section 
+        className="relative h-screen flex items-center justify-center overflow-hidden"
+        style={{
+          backgroundImage: `url('https://placehold.co/1920x1080/0f172a/ffffff?text=Premium+Real+Estate')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+        }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-black/80"></div>
+
+        <div className="relative z-10 text-center text-white max-w-4xl mx-auto px-4" style={{ paddingTop: '120px', paddingBottom: '80px' }}>
+          <motion.h1 
+            className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 leading-tight"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            Find Your <span className="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Perfect</span> Home
+          </motion.h1>
+          
+          <motion.p
+            className="text-xl md:text-2xl font-medium text-gray-300 mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.6 }}
+          >
+            Premium Real Estate
+          </motion.p>
+          
+          <motion.div
+            className="flex items-center justify-center gap-2"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 0.6 }}
+          >
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search by location, property type, or price..."
+                className="w-full py-3 pl-12 pr-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg hover:scale-105 transition-all">
+              Search
+            </button>
+          </motion.div>
+        </div>
+
+        <motion.div 
+          className="absolute bottom-8 left-1/2 transform -translate-x-1/2"
+          animate={{ y: [0, 10, 0] }}
+          transition={{ duration: 2, repeat: Infinity }}
+        >
+          <ChevronDown className="w-6 h-6 text-white/80" />
+        </motion.div>
+      </section>
+
+      {/* Stats Section */}
+      <section className="py-16 bg-white border-b border-gray-100">
+        <div className="container mx-auto px-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+            {stats.map((stat, index) => (
+              <motion.div
+                key={index}
+                className="text-center group"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+              >
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
+                  <div className="text-blue-600">
+                    {stat.icon}
+                  </div>
+                </div>
+                <div className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">{stat.value}</div>
+                <div className="text-gray-600 font-medium">{stat.label}</div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Featured Properties */}
+      <section className="py-20 bg-gray-50">
+        <div className="container mx-auto px-4">
+          <motion.div
+            className="text-center mb-16"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-100 to-purple-100 rounded-2xl mb-6">
+              <Award className="w-8 h-8 text-blue-600" />
+            </div>
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              Featured Properties
+            </h2>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Our handpicked selection of premium properties offering exceptional value and luxury craftsmanship.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filteredProperties.filter(p => p.featured).map((property, index) => (
+              <motion.div
+                key={property.id}
+                className="bg-white rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 cursor-pointer group relative"
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: index * 0.1 }}
+                whileHover={{ y: -8 }}
+                onClick={() => setSelectedProperty(property)}
+              >
+                <div className="relative overflow-hidden">
+                  <img 
+                    src={property.image} 
+                    alt={property.title}
+                    className="w-full h-64 object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm rounded-full p-2 shadow-lg">
+                    <Heart className="w-5 h-5 text-gray-400 hover:text-red-500 transition-colors" />
+                  </div>
+                  <div className="absolute bottom-4 left-4">
+                    <span className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-3 py-1.5 rounded-full text-sm font-semibold">
+                      {property.type}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xl font-bold text-gray-900 leading-tight">{property.title}</h3>
+                    <div className="flex items-center bg-yellow-50 px-2 py-1 rounded-full">
+                      <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                      <span className="ml-1 text-sm font-semibold text-gray-700">{property.rating}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center text-gray-600 mb-4">
+                    <MapPin className="w-4 h-4 mr-2 text-gray-500" />
+                    <span className="text-sm">{property.location}</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-2xl font-bold text-blue-600">{property.price}</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-gray-600 text-sm">
+                    <div className="flex items-center space-x-4">
+                      <div className="flex items-center">
+                        <Bed className="w-4 h-4 mr-1" />
+                        <span>{property.beds} beds</span>
+                      </div>
+                      <div className="flex items-center">
+                        <Bath className="w-4 h-4 mr-1" />
+                        <span>{property.baths} baths</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center">
+                      <Square className="w-4 h-4 mr-1" />
+                      <span>{property.sqft.toLocaleString()} sqft</span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* All Properties */}
+      <section className="py-20 bg-white">
+        <div className="container mx-auto px-4">
+          <motion.div
+            className="text-center mb-12"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              All Properties
+            </h2>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Browse our complete collection of available luxury properties worldwide.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filteredProperties.map((property, index) => (
+              <motion.div
+                key={property.id}
+                className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer group relative"
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: index * 0.1 }}
+                whileHover={{ y: -6 }}
+                onClick={() => setSelectedProperty(property)}
+              >
+                <div className="relative overflow-hidden">
+                  <img 
+                    src={property.image} 
+                    alt={property.title}
+                    className="w-full h-56 object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm rounded-full p-1.5 shadow-lg">
+                    <Heart className="w-4 h-4 text-gray-400 hover:text-red-500 transition-colors" />
+                  </div>
+                </div>
+                
+                <div className="p-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-lg font-bold text-gray-900 leading-tight">{property.title}</h3>
+                    <div className="flex items-center bg-yellow-50 px-1.5 py-0.5 rounded-full">
+                      <Star className="w-3 h-3 text-yellow-400 fill-current" />
+                      <span className="ml-1 text-xs font-semibold text-gray-700">{property.rating}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center text-gray-600 text-xs mb-3">
+                    <MapPin className="w-3 h-3 mr-1.5 text-gray-500" />
+                    <span>{property.location}</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-lg font-bold text-blue-600">{property.price}</span>
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{property.type}</span>
+                  </div>
+                  
+                  <div className="flex items-center text-gray-600 text-xs">
+                    <div className="flex items-center mr-3">
+                      <Bed className="w-3 h-3 mr-1" />
+                      <span>{property.beds}</span>
+                    </div>
+                    <div className="flex items-center mr-3">
+                      <Bath className="w-3 h-3 mr-1" />
+                      <span>{property.baths}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <Square className="w-3 h-3 mr-1" />
+                      <span>{property.sqft.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-20 bg-gradient-to-r from-blue-600 to-purple-600">
+        <div className="container mx-auto px-4 text-center">
+          <motion.h2 
+            className="text-4xl md:text-5xl font-bold text-white mb-6"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            Ready to Find Your Dream Home?
+          </motion.h2>
+          <motion.p 
+            className="text-lg md:text-xl text-blue-100 mb-8 max-w-3xl mx-auto leading-relaxed"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+          >
+            Our expert agents are ready to help you navigate the luxury real estate market and find the perfect property that matches your lifestyle and investment goals.
+          </motion.p>
+          <motion.div
+            className="flex flex-col sm:flex-row gap-4 justify-center"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.4 }}
+          >
+            <button className="bg-white text-blue-600 px-8 py-4 rounded-xl font-bold text-lg hover:shadow-xl transition-all hover:scale-105 flex items-center justify-center">
+              <Phone className="w-5 h-5 mr-2" />
+              Schedule Consultation
+            </button>
+            <button className="bg-transparent border-2 border-white text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-white hover:text-blue-600 transition-all flex items-center justify-center">
+              <Mail className="w-5 h-5 mr-2" />
+              Contact Agent
+            </button>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-gray-900 text-white py-16">
+        <div className="container mx-auto px-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
+            <div>
+              <div className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-4">
+                LuxEstate
+              </div>
+              <p className="text-gray-400 mb-6 leading-relaxed">
+                Your trusted partner in luxury real estate. We specialize in helping clients find, buy, and sell premium properties worldwide with unmatched expertise and personalized service.
+              </p>
+              <div className="flex space-x-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gradient-to-r hover:from-blue-600 hover:to-purple-600 transition-all cursor-pointer">
+                    <Navigation className="w-5 h-5" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {['Quick Links', 'Properties', 'Services', 'Contact'].map((category, index) => (
+              <div key={category}>
+                <h3 className="text-lg font-semibold mb-4 text-white">{category}</h3>
+                <ul className="space-y-3 text-gray-400">
+                  {['Home', 'About Us', 'Meet Agents', 'Blog', 'Contact'].slice(0, 4).map((item) => (
+                    <li key={item} className="hover:text-white transition-colors cursor-pointer hover:translate-x-1">
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          
+          <div className="border-t border-gray-800 pt-8 text-center text-gray-400">
+            <p className="text-sm">&copy; 2025 LuxEstate. All rights reserved. Licensed Real Estate Brokers serving luxury clients worldwide.</p>
+          </div>
+        </div>
+      </footer>
+
+      {/* Property Detail Modal */}
+      <AnimatePresence>
+        {selectedProperty && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+            onClick={() => setSelectedProperty(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="relative">
+                <img 
+                  src={selectedProperty.image} 
+                  alt={selectedProperty.title}
+                  className="w-full h-80 md:h-96 object-cover"
+                />
+                <button 
+                  className="absolute top-6 right-6 bg-white/90 backdrop-blur-sm rounded-full p-2 shadow-lg hover:shadow-xl transition-all"
+                  onClick={() => setSelectedProperty(null)}
+                >
+                  <X className="w-6 h-6 text-gray-700" />
+                </button>
+                <div className="absolute bottom-6 left-6">
+                  <span className="bg-white/90 backdrop-blur-sm text-gray-800 px-4 py-2 rounded-full text-sm font-semibold">
+                    {selectedProperty.type}
+                  </span>
+                </div>
+
+                {/* UPLOAD ZONE OVERLAY */}
+                <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
+                  <div className="flex items-center space-x-2 bg-white px-4 py-2 rounded-full font-medium text-gray-800">
+                    <Camera className="w-4 h-4" />
+                    <span>Replace Image</span>
+                  </div>
+                </div>
+
+                {/* Hidden Upload UI */}
+                <ReplaceImageButton
+                  propertyId={selectedProperty.id}
+                  currentImage={selectedProperty.image}
+                  onReplace={handleReplaceImage}
+                />
+              </div>
+              
+              <div className="p-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-3xl font-bold text-gray-900 mb-2">{selectedProperty.title}</h2>
+                    <div className="flex items-center text-gray-600">
+                      <MapPin className="w-5 h-5 mr-2" />
+                      <span className="text-lg">{selectedProperty.location}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center bg-yellow-50 px-3 py-2 rounded-full mt-2 md:mt-0">
+                    <Star className="w-5 h-5 text-yellow-400 fill-current" />
+                    <span className="ml-2 text-gray-700 font-semibold">{selectedProperty.rating}</span>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="text-center p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl">
+                    <div className="text-2xl font-bold text-blue-600 mb-1">{selectedProperty.price}</div>
+                    <div className="text-gray-600 text-sm font-medium">List Price</div>
+                  </div>
+                  <div className="text-center p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl">
+                    <div className="text-2xl font-bold text-gray-900 mb-1">{selectedProperty.beds}</div>
+                    <div className="text-gray-600 text-sm font-medium">Bedrooms</div>
+                  </div>
+                  <div className="text-center p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl">
+                    <div className="text-2xl font-bold text-gray-900 mb-1">{selectedProperty.baths}</div>
+                    <div className="text-gray-600 text-sm font-medium">Bathrooms</div>
+                  </div>
+                </div>
+                
+                <div className="mb-8">
+                  <h3 className="text-xl font-semibold mb-4 text-gray-900">Property Details</h3>
+                  <p className="text-gray-600 leading-relaxed text-base">
+                    {selectedProperty.description}
+                  </p>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <button className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-bold hover:shadow-xl transition-all hover:scale-105">
+                    Schedule a Private Viewing
+                  </button>
+                  <button className="flex-1 bg-gray-900 text-white py-4 rounded-xl font-bold hover:bg-gray-800 transition-all">
+                    Contact Listing Agent
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ✨ Reusable Upload Trigger Component (inside modal only)
+const ReplaceImageButton = ({ 
+  propertyId, 
+  currentImage, 
+  onReplace 
+}: { 
+  propertyId: string; 
+  currentImage: string; 
+  onReplace: (id: string, url: string) => void; 
+}) => {
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Use the same supabase client from the top of the file
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // prevent closing modal
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !userId) return;
+    if (!file) return;
 
-    setUploading(true);
+    setIsUploading(true);
+    setError(null);
+
     try {
-      // Generate unique filename
-      const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '-')}`;
-      const filePath = `blog/${userId}/${fileName}`;
+      // Generate unique file path like in TestImagePage
+      const filePath = `blog/${propertyId}/${Date.now()}_${file.name}`;
 
-      // Upload to Supabase storage
+      // ✅ Upload to the SAME bucket: 'blog-images'
       const { error: uploadErr } = await supabase.storage
         .from('blog-images')
         .upload(filePath, file, { upsert: false });
 
       if (uploadErr) throw uploadErr;
 
-      // Get public URL
+      // ✅ Get public URL the same way
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // Auto-generate title & description based on image name or random luxury phrases
-      const titles = [
-        'Oceanfront Villa',
-        'Mountain Luxury Estate',
-        'Downtown Penthouse',
-        'Private Island Retreat',
-        'Desert Oasis Mansion',
-        'Forest Canopy Sanctuary',
-        'Urban Skyline Loft',
-        'Coastal Cliffside Home'
-      ];
-
-      const descriptions = [
-        'Breathtaking views, infinity pool, smart home, private chef kitchen, and 24/7 concierge. Your dream estate awaits.',
-        'Wake up to sunrise over the ocean. This villa is pure serenity with modern elegance.',
-        'Live above the city lights. Floor-to-ceiling windows, rooftop terrace, and panoramic skyline views.',
-        'Escape to nature without sacrificing luxury. Heated floors, outdoor spa, and wildlife sanctuary access.',
-        'Designed for entertainers. Open-concept living, wine cellar, cinema room, and guest suites.'
-      ];
-
-      const title = titles[Math.floor(Math.random() * titles.length)];
-      const description = descriptions[Math.floor(Math.random() * descriptions.length)];
-
-      // Insert into blog_posts (your "property listings")
-      const { error: insertErr } = await supabase
+      // ✅ Save to the SAME table: 'blog_posts'
+      const { error: updateErr } = await supabase
         .from('blog_posts')
-        .insert({
-          user_id: userId,
-          title: title,
-          content: description,
-          image_url: imageUrl,
-          published: true,
-        });
+        .update({ image_url: imageUrl })
+        .eq('id', propertyId);
 
-      if (insertErr) throw insertErr;
+      if (updateErr) throw updateErr;
 
-      // Refresh list
-      const { data: freshData } = await supabase
-        .from('blog_posts')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setProperties(freshData || []);
-
+      // ✅ Notify parent to update UI
+      onReplace(propertyId, imageUrl);
     } catch (err: any) {
-      alert(`❌ Upload failed: ${err.message}`);
+      console.error('Image upload or DB update failed:', err);
+      setError(`Upload failed: ${err.message || 'Unknown error'}`);
     } finally {
-      setUploading(false);
-      e.target.value = '';
+      setIsUploading(false);
+      // Reset input so same file can be re-uploaded
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  // Custom header (hidden by default in layout, but we add our own here)
-  const Header = () => (
-    <div className="bg-gradient-to-r from-slate-900 to-emerald-900 text-white p-4 flex justify-between items-center">
-      <h1 className="text-2xl font-bold">Luxury Estates</h1>
-      <button 
-        onClick={() => window.location.reload()} 
-        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm"
-      >
-        Refresh
-      </button>
-    </div>
-  );
-
-  // Custom footer
-  const Footer = () => (
-    <div className="bg-slate-900 text-white p-4 text-center text-sm">
-      © {new Date().getFullYear()} Luxury Estates. All rights reserved.
-    </div>
-  );
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-emerald-50 pb-16">
-      {/* Custom Header */}
-      <Header />
-
-      {/* Hero Section */}
-      {properties.length > 0 && (
-        <div className="relative w-full h-[60vh] md:h-[70vh] overflow-hidden">
-          <div 
-            className="absolute inset-0 bg-cover bg-center" 
-            style={{ backgroundImage: `url(${properties[0].image_url})` }}
-          >
-            <div className="absolute inset-0 bg-black/50"></div>
-            <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
-              <h1 className="text-3xl md:text-5xl font-bold drop-shadow-lg">{properties[0].title}</h1>
-              <p className="mt-2 text-lg drop-shadow">{properties[0].content.substring(0, 100)}...</p>
-              <button className="mt-4 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full transition shadow-lg">
-                View Details →
-              </button>
-            </div>
-          </div>
+    <>
+      <div
+        onClick={handleClick}
+        className="absolute inset-0 z-10"
+        style={{ display: 'block' }}
+      />
+      <input
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        ref={fileInputRef}
+        className="hidden"
+      />
+      {isUploading && (
+        <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm">
+          Uploading...
         </div>
       )}
-
-      {/* Upload Button (Floating) */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <label className="block bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-full shadow-xl cursor-pointer transition transform hover:scale-105">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleUpload}
-            disabled={uploading}
-            className="hidden"
-          />
-        </label>
-      </div>
-
-      {/* Property Grid */}
-      <div className="container mx-auto px-4 py-12">
-        <h2 className="text-3xl font-bold text-center mb-12 text-slate-800">Featured Properties</h2>
-        
-        {properties.length === 0 ? (
-          <div className="text-center py-12 text-slate-500">
-            No properties yet. Upload your first image to create one!
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {properties.map((property, idx) => (
-              <div
-                key={property.id}
-                className="bg-white rounded-xl overflow-hidden shadow-lg hover:shadow-2xl transition duration-300 transform hover:-translate-y-1"
-              >
-                {property.image_url ? (
-                  <div className="h-64 bg-cover bg-center" style={{ backgroundImage: `url(${property.image_url})` }} />
-                ) : (
-                  <div className="h-64 bg-gradient-to-r from-emerald-400 to-teal-500 flex items-center justify-center">
-                    <span className="text-white text-lg font-bold">No Image</span>
-                  </div>
-                )}
-                <div className="p-5">
-                  <h3 className="text-xl font-bold text-slate-800">{property.title}</h3>
-                  <p className="mt-2 text-slate-600 line-clamp-3">{property.content}</p>
-                  <button className="mt-4 w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-semibold rounded-lg transition">
-                    View Details →
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Custom Footer */}
-      <Footer />
-
-      {/* Global Styles */}
-      <style jsx global>{`
-        body {
-          margin: 0;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        .line-clamp-3 {
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-      `}</style>
-    </div>
+      {error && (
+        <div className="absolute top-4 left-4 bg-red-600 text-white px-3 py-1 rounded-full text-sm">
+          {error}
+        </div>
+      )}
+    </>
   );
-}
+};
+
+export default App;
