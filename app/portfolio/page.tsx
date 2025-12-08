@@ -1,8 +1,10 @@
+// app/portfolio/page.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabaseClient';
+import { PageWithChrome } from '@/components/PageWithChrome';
 
 // Define types
 interface PortfolioItem {
@@ -29,7 +31,6 @@ interface FormData {
   image_url?: File | string | null;
   logo_url?: File | string | null;
 }
-
 
 // Helper: get current user ID
 const getCurrentUserId = async (): Promise<string | null> => {
@@ -346,649 +347,686 @@ export default function PortfolioPage() {
   }
 
   return (
-    <div className="portfolio-content">
-      {/* Trusted By Banner (Public) */}
-      {clients.length > 0 && (
-        <div className="credibility-banner">
-          <h3>Trusted By</h3>
-          <div className="org-logos">
-            {clients.map(client => (
-              <div key={client.id} className="org-badge" title={client.name}>
-                {client.logo_url ? (
-                  <img
-                    src={client.logo_url}
-                    alt={client.name}
-                    style={{
-                      width: '64px',
-                      height: '64px',
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                    }}
-                  />
-                ) : (
-                  <span>{getOrgInitials(client.name)}</span>
-                )}
-                <small>{client.name}</small>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Owner: Trusted Clients Management */}
-      {currentUserId && (
-        <div className="trusted-clients-section">
-          <div className="trusted-clients-header">
-            <h3>My Trusted Clients</h3>
-            <button className="btn primary" onClick={() => openModal('addClient')}>
-              + Add Client
-            </button>
-          </div>
-          {clients.length === 0 ? (
-            <div className="empty-state">
-              <p>✨ No trusted clients added yet.</p>
-            </div>
-          ) : (
-            <div className="trusted-clients-grid">
+    <PageWithChrome>
+      <div className="portfolio-content">
+        {/* Trusted By Banner (Public) */}
+        {clients.length > 0 && (
+          <div
+            className="credibility-banner"
+            style={{
+              background: '#f8fafc',
+              padding: '2rem',
+              borderRadius: '12px',
+              marginBottom: '2.5rem',
+              textAlign: 'center',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.03)',
+            }}
+          >
+            <h3 style={{ margin: '0 0 1.5rem', color: '#1e293b', fontWeight: 600, fontSize: '1.4rem', letterSpacing: '-0.2px' }}>
+              Trusted By
+            </h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '2rem', alignItems: 'center' }}>
               {clients.map(client => (
-                <div key={client.id} className="client-card">
+                <div
+                  key={client.id}
+                  className="org-badge"
+                  title={client.name}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', transition: 'transform 0.2s ease' }}
+                >
                   {client.logo_url ? (
-                    <img src={client.logo_url} alt={client.name} className="client-logo" />
+                    <img
+                      src={client.logo_url}
+                      alt={client.name}
+                      style={{
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                      }}
+                    />
                   ) : (
-                    <div className="client-logo">{getOrgInitials(client.name)}</div>
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '64px',
+                        height: '64px',
+                        background: '#e2e8f0',
+                        borderRadius: '50%',
+                        fontWeight: 700,
+                        color: '#475569',
+                        fontSize: '1.2rem',
+                        letterSpacing: '-0.5px',
+                      }}
+                    >
+                      {getOrgInitials(client.name)}
+                    </span>
                   )}
-                  <div className="client-name">{client.name}</div>
-                  <div className="client-actions">
-                    <button
-                      className="client-edit-btn"
-                      onClick={() => openModal('editClient', client)}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      className="client-delete-btn"
-                      onClick={() => handleDeleteClient(client.id, client.logo_url)}
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                  <small style={{ fontSize: '0.85rem', color: '#64748b', maxWidth: '120px', textAlign: 'center', fontWeight: 500 }}>
+                    {client.name}
+                  </small>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Projects */}
-      {projects.length === 0 ? (
-        <div className="empty-state">
-          <p>✨ No projects published yet.</p>
-          {currentUserId && (
-            <button className="btn primary" onClick={() => openModal('addProject')}>
-              + Add Project
-            </button>
-          )}
-        </div>
-      ) : (
-        <>
-          <div className="project-grid">
-            {projects.map(item => {
-              const isOwner = currentUserId === item.user_id;
-              return (
-                <div key={item.id} className="project-card">
-                  <h3>{item.title}</h3>
-                  <p>{item.description || <em>No description</em>}</p>
-                  {item.image_url && (
-                    <div className="project-image-container">
-                      <img
-                        src={item.image_url}
-                        alt={item.title}
-                        className="project-image"
-                      />
-                    </div>
-                  )}
-                  {isOwner && (
-                    <div className="project-actions">
-                      <button
-                        className="edit-btn"
-                        onClick={() => openModal('editProject', item)}
-                      >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        className="delete-btn"
-                        onClick={() => handleDeleteProject(item.id, item.image_url)}
-                      >
-                        🗑️ Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
           </div>
-          {currentUserId && (
-            <button
-              className="btn primary"
-              style={{
-                marginTop: '1.5rem',
-                display: 'block',
-                marginLeft: 'auto',
-                marginRight: 'auto',
-              }}
-              onClick={() => openModal('addProject')}
-            >
-              + Add Project
-            </button>
-          )}
-        </>
-      )}
+        )}
 
-      {/* Modal */}
-      {modalOpen && (
-        <div className="portfolio-modal">
-          <div className="portfolio-modal-content">
-            <span className="close" onClick={closeModal}>
-              &times;
-            </span>
-            <h2>
-              {modalMode === 'addProject'
-                ? 'Add New Project'
-                : modalMode === 'editProject'
-                ? 'Edit Project'
-                : modalMode === 'addClient'
-                ? 'Add Trusted Client'
-                : 'Edit Trusted Client'}
-            </h2>
-            <form id="portfolio-modal-form" onSubmit={handleSubmit}>
-              {(modalMode === 'addProject' || modalMode === 'editProject') && (
-                <>
-                  <div className="form-group">
-                    <label htmlFor="pf-title">Project Title</label>
-                    <input
-                      type="text"
-                      id="pf-title"
-                      value={modalData.title || ''}
-                      onChange={e => setModalData(prev => ({ ...prev, title: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="pf-description">Description</label>
-                    <textarea
-                      id="pf-description"
-                      value={modalData.description || ''}
-                      onChange={e => setModalData(prev => ({ ...prev, description: e.target.value }))}
-                      placeholder="Details about this project..."
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Project Image (optional)</label>
-                    <div className="image-upload-area">
-                      {typeof modalData.image_url === 'string' && modalData.image_url && (
-                        <img src={modalData.image_url} alt="Preview" className="preview-image" />
-                      )}
-                      <input
-                        type="file"
-                        id="pf-image_url"
-                        accept="image/*"
-                        onChange={e => handleFileChange(e, 'image_url')}
-                        style={{ display: 'none' }}
+        {/* Owner: Trusted Clients Management */}
+        {currentUserId && (
+          <div
+            className="trusted-clients-section"
+            style={{
+              marginBottom: '2.5rem',
+              padding: '1.5rem',
+              background: '#fcfdff',
+              borderRadius: '12px',
+              border: '1px solid #e2e8f0',
+            }}
+          >
+            <div
+              className="trusted-clients-header"
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}
+            >
+              <h3 style={{ margin: 0, color: '#1e293b', fontWeight: 600, fontSize: '1.3rem' }}>My Trusted Clients</h3>
+              <button
+                className="btn primary"
+                onClick={() => openModal('addClient')}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '0.95rem',
+                  background: '#3b82f6',
+                  color: 'white',
+                  transition: 'all 0.2s',
+                }}
+              >
+                + Add Client
+              </button>
+            </div>
+            {clients.length === 0 ? (
+              <div
+                className="empty-state"
+                style={{
+                  textAlign: 'center',
+                  padding: '3rem 1rem',
+                  color: '#7f8c8d',
+                  border: '2px dashed #e2e8f0',
+                  borderRadius: '12px',
+                  background: '#fafcff',
+                }}
+              >
+                <p>✨ No trusted clients added yet.</p>
+              </div>
+            ) : (
+              <div
+                className="trusted-clients-grid"
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1.5rem' }}
+              >
+                {clients.map(client => (
+                  <div
+                    key={client.id}
+                    className="client-card"
+                    style={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      padding: '1rem',
+                      background: 'white',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
+                      transition: 'all 0.2s ease',
+                      position: 'relative',
+                    }}
+                  >
+                    {client.logo_url ? (
+                      <img
+                        src={client.logo_url}
+                        alt={client.name}
+                        className="client-logo"
+                        style={{
+                          width: '100%',
+                          height: '80px',
+                          borderRadius: '8px',
+                          margin: '0.5rem 0',
+                          objectFit: 'contain',
+                          background: '#f8fafc',
+                          border: '1px solid #f1f5f9',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.5rem',
+                          fontWeight: 'bold',
+                          color: '#475569',
+                        }}
                       />
+                    ) : (
                       <div
-                        className="upload-placeholder"
+                        className="client-logo"
+                        style={{
+                          width: '100%',
+                          height: '80px',
+                          borderRadius: '8px',
+                          margin: '0.5rem 0',
+                          background: '#f8fafc',
+                          border: '1px solid #f1f5f9',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.5rem',
+                          fontWeight: 'bold',
+                          color: '#475569',
+                        }}
+                      >
+                        {getOrgInitials(client.name)}
+                      </div>
+                    )}
+                    <div
+                      className="client-name"
+                      style={{
+                        fontWeight: 600,
+                        color: '#1e293b',
+                        marginTop: '0.5rem',
+                        fontSize: '0.95rem',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {client.name}
+                    </div>
+                    <div
+                      className="client-actions"
+                      style={{
+                        position: 'absolute',
+                        top: '0.5rem',
+                        right: '0.5rem',
+                        display: 'flex',
+                        gap: '0.25rem',
+                      }}
+                    >
+                      <button
+                        className="client-edit-btn"
+                        onClick={() => openModal('editClient', client)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.8rem',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          background: '#3b82f6',
+                          color: 'white',
+                          transition: 'opacity 0.2s',
+                        }}
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        className="client-delete-btn"
+                        onClick={() => handleDeleteClient(client.id, client.logo_url)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.8rem',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          background: '#ef4444',
+                          color: 'white',
+                          transition: 'opacity 0.2s',
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Projects */}
+        {projects.length === 0 ? (
+          <div
+            className="empty-state"
+            style={{
+              textAlign: 'center',
+              padding: '3rem 1rem',
+              color: '#7f8c8d',
+              border: '2px dashed #e2e8f0',
+              borderRadius: '12px',
+              background: '#fafcff',
+            }}
+          >
+            <p>✨ No projects published yet.</p>
+            {currentUserId && (
+              <button
+                className="btn primary"
+                onClick={() => openModal('addProject')}
+                style={{
+                  marginTop: '1rem',
+                  padding: '0.6rem 1.2rem',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '0.95rem',
+                  background: '#3b82f6',
+                  color: 'white',
+                  transition: 'all 0.2s',
+                }}
+              >
+                + Add Project
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div
+              className="project-grid"
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.8rem', marginTop: '1rem' }}
+            >
+              {projects.map(item => {
+                const isOwner = currentUserId === item.user_id;
+                return (
+                  <div
+                    key={item.id}
+                    className="project-card"
+                    style={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      padding: '1.25rem',
+                      background: 'white',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
+                      transition: 'all 0.2s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.15rem', color: '#1e293b', lineHeight: '1.3' }}>
+                      {item.title}
+                    </h3>
+                    <p style={{ margin: '0 0 1rem', color: '#64748b', fontSize: '0.95rem', lineHeight: '1.6', flexGrow: 1 }}>
+                      {item.description || <em>No description</em>}
+                    </p>
+                    {item.image_url && (
+                      <div
+                        className="project-image-container"
+                        style={{
+                          width: '100%',
+                          margin: '0.5rem 0',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          border: '1px solid #f1f5f9',
+                          background: '#f8fafc',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <img
+                          src={item.image_url}
+                          alt={item.title}
+                          className="project-image"
+                          style={{
+                            width: '100%',
+                            height: 'auto',
+                            display: 'block',
+                            objectFit: 'contain',
+                            borderRadius: '8px',
+                          }}
+                        />
+                      </div>
+                    )}
+                    {isOwner && (
+                      <div
+                        className="project-actions"
+                        style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', flexShrink: 0 }}
+                      >
+                        <button
+                          className="edit-btn"
+                          onClick={() => openModal('editProject', item)}
+                          style={{
+                            flex: 1,
+                            padding: '0.5rem',
+                            fontSize: '0.9rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            background: '#3b82f6',
+                            color: 'white',
+                            transition: 'opacity 0.2s',
+                          }}
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          className="delete-btn"
+                          onClick={() => handleDeleteProject(item.id, item.image_url)}
+                          style={{
+                            flex: 1,
+                            padding: '0.5rem',
+                            fontSize: '0.9rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            background: '#ef4444',
+                            color: 'white',
+                            transition: 'opacity 0.2s',
+                          }}
+                        >
+                          🗑️ Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {currentUserId && (
+              <button
+                className="btn primary"
+                style={{
+                  marginTop: '1.5rem',
+                  display: 'block',
+                  marginLeft: 'auto',
+                  marginRight: 'auto',
+                  padding: '0.6rem 1.2rem',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '0.95rem',
+                  background: '#3b82f6',
+                  color: 'white',
+                  transition: 'all 0.2s',
+                }}
+                onClick={() => openModal('addProject')}
+              >
+                + Add Project
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Modal */}
+        {modalOpen && (
+          <div
+            className="portfolio-modal"
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              background: 'rgba(0, 0, 0, 0.6)',
+              zIndex: 10000,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem',
+            }}
+          >
+            <div
+              className="portfolio-modal-content"
+              style={{
+                background: 'white',
+                padding: '2rem',
+                borderRadius: '14px',
+                maxWidth: '520px',
+                width: '100%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+              }}
+            >
+              <span
+                className="close"
+                onClick={closeModal}
+                style={{
+                  position: 'absolute',
+                  top: '1.25rem',
+                  right: '1.25rem',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#cbd5e1',
+                  transition: 'color 0.2s',
+                }}
+              >
+                &times;
+              </span>
+              <h2 style={{ marginTop: 0, color: '#1e293b', fontSize: '1.4rem' }}>
+                {modalMode === 'addProject'
+                  ? 'Add New Project'
+                  : modalMode === 'editProject'
+                  ? 'Edit Project'
+                  : modalMode === 'addClient'
+                  ? 'Add Trusted Client'
+                  : 'Edit Trusted Client'}
+              </h2>
+              <form id="portfolio-modal-form" onSubmit={handleSubmit}>
+                {(modalMode === 'addProject' || modalMode === 'editProject') && (
+                  <>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                      <label
+                        htmlFor="pf-title"
+                        style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}
+                      >
+                        Project Title
+                      </label>
+                      <input
+                        type="text"
+                        id="pf-title"
+                        value={modalData.title || ''}
+                        onChange={e => setModalData(prev => ({ ...prev, title: e.target.value }))}
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '0.65rem',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.95rem',
+                          fontFamily: 'inherit',
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                      <label
+                        htmlFor="pf-description"
+                        style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}
+                      >
+                        Description
+                      </label>
+                      <textarea
+                        id="pf-description"
+                        value={modalData.description || ''}
+                        onChange={e => setModalData(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Details about this project..."
+                        style={{
+                          width: '100%',
+                          padding: '0.65rem',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.95rem',
+                          fontFamily: 'inherit',
+                          resize: 'vertical',
+                          minHeight: '100px',
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                      <label style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>
+                        Project Image (optional)
+                      </label>
+                      <div
+                        style={{
+                          border: '2px dashed #cbd5e1',
+                          borderRadius: '10px',
+                          padding: '1.5rem',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          minHeight: '160px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
                         onClick={() => document.getElementById('pf-image_url')?.click()}
                       >
-                        <p>Drag & drop an image or click to browse</p>
+                        {typeof modalData.image_url === 'string' && modalData.image_url && (
+                          <img
+                            src={modalData.image_url}
+                            alt="Preview"
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '200px',
+                              borderRadius: '8px',
+                              marginBottom: '1rem',
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                            }}
+                          />
+                        )}
+                        <input
+                          type="file"
+                          id="pf-image_url"
+                          accept="image/*"
+                          onChange={e => handleFileChange(e, 'image_url')}
+                          style={{ display: 'none' }}
+                        />
+                        <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.95rem' }}>
+                          Drag & drop an image or click to browse
+                        </p>
                       </div>
                     </div>
-                  </div>
-                </>
-              )}
+                  </>
+                )}
 
-              {(modalMode === 'addClient' || modalMode === 'editClient') && (
-                <>
-                  <div className="form-group">
-                    <label htmlFor="pf-name">Client Name</label>
-                    <input
-                      type="text"
-                      id="pf-name"
-                      value={modalData.name || ''}
-                      onChange={e => setModalData(prev => ({ ...prev, name: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Logo Image (optional)</label>
-                    <div className="image-upload-area">
-                      {typeof modalData.logo_url === 'string' && modalData.logo_url && (
-                        <img src={modalData.logo_url} alt="Preview" className="preview-image" />
-                      )}
+                {(modalMode === 'addClient' || modalMode === 'editClient') && (
+                  <>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                      <label
+                        htmlFor="pf-name"
+                        style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}
+                      >
+                        Client Name
+                      </label>
                       <input
-                        type="file"
-                        id="pf-logo_url"
-                        accept="image/*"
-                        onChange={e => handleFileChange(e, 'logo_url')}
-                        style={{ display: 'none' }}
+                        type="text"
+                        id="pf-name"
+                        value={modalData.name || ''}
+                        onChange={e => setModalData(prev => ({ ...prev, name: e.target.value }))}
+                        required
+                        style={{
+                          width: '100%',
+                          padding: '0.65rem',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '0.95rem',
+                          fontFamily: 'inherit',
+                        }}
                       />
+                    </div>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                      <label style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>
+                        Logo Image (optional)
+                      </label>
                       <div
-                        className="upload-placeholder"
+                        style={{
+                          border: '2px dashed #cbd5e1',
+                          borderRadius: '10px',
+                          padding: '1.5rem',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          minHeight: '160px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
                         onClick={() => document.getElementById('pf-logo_url')?.click()}
                       >
-                        <p>Drag & drop an image or click to browse</p>
+                        {typeof modalData.logo_url === 'string' && modalData.logo_url && (
+                          <img
+                            src={modalData.logo_url}
+                            alt="Preview"
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '200px',
+                              borderRadius: '8px',
+                              marginBottom: '1rem',
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                            }}
+                          />
+                        )}
+                        <input
+                          type="file"
+                          id="pf-logo_url"
+                          accept="image/*"
+                          onChange={e => handleFileChange(e, 'logo_url')}
+                          style={{ display: 'none' }}
+                        />
+                        <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.95rem' }}>
+                          Drag & drop an image or click to browse
+                        </p>
                       </div>
                     </div>
-                  </div>
-                </>
-              )}
+                  </>
+                )}
 
-              <div className="modal-actions">
-                <button type="button" className="btn secondary" onClick={closeModal}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn primary">
-                  Save
-                </button>
-              </div>
-            </form>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '0.75rem',
+                    justifyContent: 'flex-end',
+                    marginTop: '1.5rem',
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={closeModal}
+                    style={{
+                      padding: '0.6rem 1.2rem',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '0.95rem',
+                      background: '#f1f5f9',
+                      color: '#1e293b',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn primary"
+                    style={{
+                      padding: '0.6rem 1.2rem',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '0.95rem',
+                      background: '#3b82f6',
+                      color: 'white',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
-
-      <style jsx>{`
-        .portfolio-content {
-          margin-top: 1.5rem;
-        }
-        .loading {
-          text-align: center;
-          color: #7f8c8d;
-          margin: 2rem 0;
-        }
-        .error {
-          color: #e74c3c;
-          margin: 1rem 0;
-        }
-
-        .credibility-banner {
-          background: #f8fafc;
-          padding: 2rem;
-          border-radius: 12px;
-          margin-bottom: 2.5rem;
-          text-align: center;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
-        }
-        .credibility-banner h3 {
-          margin: 0 0 1.5rem;
-          color: #1e293b;
-          font-weight: 600;
-          font-size: 1.4rem;
-          letter-spacing: -0.2px;
-        }
-        .org-logos {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
-          gap: 2rem;
-          align-items: center;
-        }
-        .org-badge {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.5rem;
-          transition: transform 0.2s ease;
-        }
-        .org-badge:hover {
-          transform: translateY(-2px);
-        }
-        .org-badge span {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 64px;
-          height: 64px;
-          background: #e2e8f0;
-          border-radius: 50%;
-          font-weight: 700;
-          color: #475569;
-          font-size: 1.2rem;
-          letter-spacing: -0.5px;
-        }
-        .org-badge small {
-          font-size: 0.85rem;
-          color: #64748b;
-          max-width: 120px;
-          text-align: center;
-          font-weight: 500;
-        }
-
-        .project-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 1.8rem;
-          margin-top: 1rem;
-        }
-        .project-card {
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 1.25rem;
-          background: white;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
-          transition: all 0.2s ease;
-          display: flex;
-          flex-direction: column;
-        }
-        .project-card:hover {
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
-          transform: translateY(-2px);
-        }
-        .project-card h3 {
-          margin: 0 0 0.75rem;
-          font-size: 1.15rem;
-          color: #1e293b;
-          line-height: 1.3;
-        }
-        .project-card p {
-          margin: 0 0 1rem;
-          color: #64748b;
-          font-size: 0.95rem;
-          line-height: 1.6;
-          flex-grow: 1;
-        }
-        .project-image-container {
-          width: 100%;
-          margin: 0.5rem 0;
-          border-radius: 8px;
-          overflow: hidden;
-          border: 1px solid #f1f5f9;
-          background: #f8fafc;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .project-image {
-          width: 100%;
-          height: auto;
-          display: block;
-          object-fit: contain;
-          border-radius: 8px;
-        }
-
-        .project-actions {
-          display: flex;
-          gap: 0.75rem;
-          margin-top: 1rem;
-          flex-shrink: 0;
-        }
-        .project-actions button {
-          flex: 1;
-          padding: 0.5rem;
-          font-size: 0.9rem;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: 600;
-          transition: opacity 0.2s;
-        }
-        .project-actions button:hover {
-          opacity: 0.95;
-        }
-        .edit-btn {
-          background: #3b82f6;
-          color: white;
-        }
-        .delete-btn {
-          background: #ef4444;
-          color: white;
-        }
-
-        .trusted-clients-section {
-          margin-bottom: 2.5rem;
-          padding: 1.5rem;
-          background: #fcfdff;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-        }
-        .trusted-clients-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 1rem;
-        }
-        .trusted-clients-header h3 {
-          margin: 0;
-          color: #1e293b;
-          font-weight: 600;
-          font-size: 1.3rem;
-        }
-        .trusted-clients-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-          gap: 1.5rem;
-        }
-        .client-card {
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 1rem;
-          background: white;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
-          transition: all 0.2s ease;
-          position: relative;
-        }
-        .client-card:hover {
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
-          transform: translateY(-2px);
-        }
-        .client-logo {
-          width: 100%;
-          height: 80px;
-          border-radius: 8px;
-          margin: 0.5rem 0;
-          object-fit: contain;
-          background: #f8fafc;
-          border: 1px solid #f1f5f9;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 1.5rem;
-          font-weight: bold;
-          color: #475569;
-        }
-        .client-name {
-          font-weight: 600;
-          color: #1e293b;
-          margin: 0.5rem 0 0;
-          font-size: 0.95rem;
-          text-align: center;
-        }
-        .client-actions {
-          position: absolute;
-          top: 0.5rem;
-          right: 0.5rem;
-          display: flex;
-          gap: 0.25rem;
-        }
-        .client-actions button {
-          padding: 0.25rem 0.5rem;
-          font-size: 0.8rem;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-weight: 600;
-          transition: opacity 0.2s;
-        }
-        .client-edit-btn {
-          background: #3b82f6;
-          color: white;
-        }
-        .client-delete-btn {
-          background: #ef4444;
-          color: white;
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 3rem 1rem;
-          color: #7f8c8d;
-          border: 2px dashed #e2e8f0;
-          border-radius: 12px;
-          background: #fafcff;
-        }
-
-        .portfolio-modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0, 0, 0, 0.6);
-          z-index: 10000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 1rem;
-        }
-        .portfolio-modal-content {
-          background: white;
-          padding: 2rem;
-          border-radius: 14px;
-          max-width: 520px;
-          width: 100%;
-          max-height: 90vh;
-          overflow-y: auto;
-          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-        }
-        .portfolio-modal h2 {
-          margin-top: 0;
-          color: #1e293b;
-          font-size: 1.4rem;
-        }
-        .close {
-          position: absolute;
-          top: 1.25rem;
-          right: 1.25rem;
-          font-size: 1.5rem;
-          cursor: pointer;
-          color: #cbd5e1;
-          transition: color 0.2s;
-        }
-        .close:hover {
-          color: #94a3b8;
-        }
-        .form-group {
-          margin-bottom: 1.5rem;
-        }
-        .form-group label {
-          display: block;
-          margin-bottom: 0.6rem;
-          font-weight: 600;
-          color: #1e293b;
-          font-size: 0.95rem;
-        }
-        .form-group input,
-        .form-group textarea {
-          width: 100%;
-          padding: 0.65rem;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          font-size: 0.95rem;
-          font-family: inherit;
-          transition: border-color 0.2s;
-        }
-        .form-group input:focus,
-        .form-group textarea:focus {
-          outline: none;
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-        .form-group textarea {
-          resize: vertical;
-          min-height: 100px;
-        }
-
-        .image-upload-area {
-          border: 2px dashed #cbd5e1;
-          border-radius: 10px;
-          padding: 1.5rem;
-          text-align: center;
-          cursor: pointer;
-          transition: all 0.2s;
-          position: relative;
-          min-height: 160px;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-        }
-        .image-upload-area:hover {
-          border-color: #94a3b8;
-          background: #f8fafc;
-        }
-        .preview-image {
-          max-width: 100%;
-          max-height: 200px;
-          border-radius: 8px;
-          margin-bottom: 1rem;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        .upload-placeholder p {
-          margin: 0;
-          color: #94a3b8;
-          font-size: 0.95rem;
-        }
-
-        .btn {
-          padding: 0.6rem 1.2rem;
-          border: none;
-          border-radius: 8px;
-          font-weight: 600;
-          cursor: pointer;
-          font-size: 0.95rem;
-          transition: all 0.2s;
-        }
-        .btn.primary {
-          background: #3b82f6;
-          color: white;
-        }
-        .btn.secondary {
-          background: #f1f5f9;
-          color: #1e293b;
-        }
-        .modal-actions {
-          display: flex;
-          gap: 0.75rem;
-          justify-content: flex-end;
-          margin-top: 1.5rem;
-        }
-
-        @media (max-width: 768px) {
-          .org-logos {
-            gap: 1.2rem;
-          }
-          .org-badge span {
-            width: 56px;
-            height: 56px;
-            font-size: 1.1rem;
-          }
-          .project-grid,
-          .trusted-clients-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .credibility-banner {
-            padding: 1.25rem;
-          }
-          .project-card {
-            padding: 1rem;
-          }
-          .project-actions button {
-            padding: 0.4rem;
-            font-size: 0.8rem;
-          }
-        }
-      `}</style>
-    </div>
+        )}
+      </div>
+    </PageWithChrome>
   );
 }
