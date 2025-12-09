@@ -3,14 +3,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// Curated art collection with emotional descriptors instead of specs
+// Curated art collection with emotional descriptors and upload prompts
 const ARTWORKS = [
   { 
     id: 'midnight-garden', 
@@ -18,7 +18,8 @@ const ARTWORKS = [
     artist: 'Elena Vostok',
     emotionalTags: ['serenity', 'mystery', 'rebirth'],
     dimensions: '120x90cm',
-    medium: 'Digital oil on canvas'
+    medium: 'Digital oil on canvas',
+    prompt: 'Upload a serene night garden with glowing flowers under moonlight, deep blues and purples with subtle luminescent details'
   },
   { 
     id: 'neon-dreams', 
@@ -26,7 +27,8 @@ const ARTWORKS = [
     artist: 'Kaito Nakamura',
     emotionalTags: ['energy', 'nostalgia', 'urban'],
     dimensions: 'Digital exclusive',
-    medium: 'Generative AI + hand-finished'
+    medium: 'Generative AI + hand-finished',
+    prompt: 'Upload vibrant neon cityscape at night with rain-slicked streets reflecting colorful signs, cyberpunk aesthetic with warm/cool contrast'
   },
   { 
     id: 'ocean-memory', 
@@ -34,7 +36,8 @@ const ARTWORKS = [
     artist: 'Sophia Rivers',
     emotionalTags: ['melancholy', 'depth', 'tranquility'],
     dimensions: '150x100cm',
-    medium: 'Mixed media collage'
+    medium: 'Mixed media collage',
+    prompt: 'Upload abstract ocean waves with layered textures, deep blues and teals with hints of gold light breaking through surface'
   },
   { 
     id: 'desert-whispers', 
@@ -42,7 +45,8 @@ const ARTWORKS = [
     artist: 'Mateo Solis',
     emotionalTags: ['solitude', 'resilience', 'time'],
     dimensions: '90x180cm triptych',
-    medium: 'Sand-infused acrylic'
+    medium: 'Sand-infused acrylic',
+    prompt: 'Upload desert landscape at golden hour with dramatic shadows, textured sand dunes and distant mountains under vast sky'
   },
   { 
     id: 'quantum-bloom', 
@@ -50,7 +54,8 @@ const ARTWORKS = [
     artist: 'Aisha Chen',
     emotionalTags: ['wonder', 'transformation', 'light'],
     dimensions: 'Interactive digital',
-    medium: 'Projection mapping'
+    medium: 'Projection mapping',
+    prompt: 'Upload glowing fractal patterns with light particles forming flower shapes, dark background with vibrant magenta and cyan energy flows'
   },
 ];
 
@@ -74,8 +79,10 @@ export default function ArtGalleryPage() {
   const [activeArtwork, setActiveArtwork] = useState<string | null>(null);
   const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
   const galleryRef = useRef<HTMLDivElement>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const controls = useAnimation();
 
-  // Track cursor position for interactive effects
+  // Track cursor position
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (galleryRef.current) {
@@ -152,7 +159,7 @@ export default function ArtGalleryPage() {
           setArtworks(initialState);
         }
 
-        // Fetch hero image (gallery ambiance)
+        // Fetch hero image
         const { data: heroData, error: heroError } = await supabase
           .from('blog_posts')
           .select('image_url')
@@ -173,7 +180,16 @@ export default function ArtGalleryPage() {
     init();
   }, []);
 
-  // Upload handlers remain similar but with artistic context
+  // Cleanup hover timeout
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Upload handlers
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, artworkId: string) => {
     if (!adminMode) return;
     const file = e.target.files?.[0];
@@ -291,7 +307,7 @@ export default function ArtGalleryPage() {
     }
   };
 
-  // Interactive cursor effect container
+  // Cursor follower effect
   const CursorFollower = () => (
     <motion.div 
       className="fixed w-16 h-16 rounded-full bg-white/10 backdrop-blur-sm pointer-events-none z-50 border border-white/20"
@@ -313,7 +329,7 @@ export default function ArtGalleryPage() {
     <div className="min-h-screen bg-[#0a0a0a] text-white overflow-x-hidden">
       <CursorFollower />
       
-      {/* Immersive Header - No traditional nav */}
+      {/* Immersive Header */}
       <header className="fixed top-0 left-0 right-0 z-40 py-4 px-6 backdrop-blur-sm bg-black/30">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <motion.div 
@@ -348,7 +364,7 @@ export default function ArtGalleryPage() {
         </div>
       </header>
 
-      {/* Dynamic Hero - Reactive to cursor position */}
+      {/* Dynamic Hero */}
       <div 
         ref={galleryRef}
         className="h-screen relative overflow-hidden"
@@ -383,7 +399,7 @@ export default function ArtGalleryPage() {
           </motion.div>
         </div>
 
-        {/* Curator controls - integrated as subtle elements */}
+        {/* Curator controls */}
         {userId && adminMode && (
           <div className="absolute bottom-8 right-8 z-30">
             <label 
@@ -419,7 +435,7 @@ export default function ArtGalleryPage() {
         )}
       </div>
 
-      {/* Interactive Art Collection */}
+      {/* Interactive Art Collection - CLICK TO EXPAND */}
       <section className="py-20 px-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-black via-purple-900/5 to-black pointer-events-none" />
         
@@ -444,10 +460,8 @@ export default function ArtGalleryPage() {
                   initial={{ opacity: 0, y: 50 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
-                  whileHover={{ y: -10 }}
-                  onHoverStart={() => setActiveArtwork(artwork.id)}
-                  onHoverEnd={() => setActiveArtwork(null)}
-                  className={`group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-500 ${
+                  onClick={() => setActiveArtwork(isActive ? null : artwork.id)}
+                  className={`group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 ${
                     isActive ? 'md:col-span-2 lg:col-span-3 z-20' : ''
                   }`}
                   style={{
@@ -456,15 +470,46 @@ export default function ArtGalleryPage() {
                   }}
                 >
                   <div 
-                    className="absolute inset-0 bg-center bg-cover transition-all duration-700 bg-blend-overlay"
+                    className="absolute inset-0 bg-center bg-cover transition-all duration-700"
                     style={{ 
                       backgroundImage: data?.image_url ? `url(${data.image_url})` : 'linear-gradient(135deg, #1a1a3a 0%, #3a1a3a 100%)',
-                      filter: isActive ? 'brightness(1)' : 'brightness(0.7)',
+                      filter: isActive ? 'brightness(1.1)' : 'brightness(0.8)',
                       backgroundSize: isActive ? 'cover' : '110%'
                     }}
                   >
-                    {/* Subtle texture overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-black/30 via-transparent to-purple-900/20" />
+                    {/* Admin upload button - always visible in admin mode */}
+                    {userId && adminMode && (
+                      <div className="absolute top-4 right-4 z-10">
+                        <label 
+                          htmlFor={`upload-${artwork.id}`}
+                          className="block w-10 h-10 rounded-full bg-black/70 border border-purple-500/30 backdrop-blur-sm flex items-center justify-center cursor-pointer hover:bg-purple-900/30 transition-colors"
+                          onClick={(e) => e.stopPropagation()} // Prevent card click when clicking upload
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                          <input
+                            type="file"
+                            id={`upload-${artwork.id}`}
+                            accept="image/*"
+                            onChange={(e) => {
+                              handleUpload(e, artwork.id);
+                              // Close expanded view after upload
+                              if (isActive) setActiveArtwork(null);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    )}
+                    
+                    {/* Admin-only upload prompt */}
+                    {userId && adminMode && !data?.image_url && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm p-4 text-center text-purple-200 text-sm border-t border-purple-500/30">
+                        <p className="font-medium">Upload suggestion:</p>
+                        <p className="mt-1">{artwork.prompt}</p>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Artwork details panel */}
@@ -500,32 +545,11 @@ export default function ArtGalleryPage() {
                         </div>
                         <div>
                           <p className="text-sm text-purple-300 mb-1">Experience</p>
-                          <p className="font-medium">{isActive ? 'Immersive' : 'Hover to expand'}</p>
+                          <p className="font-medium">{isActive ? 'Immersive view' : 'Click to explore'}</p>
                         </div>
                       </div>
                     </div>
                   </motion.div>
-                  
-                  {/* Admin controls - appear on hover */}
-                  {userId && adminMode && !isActive && (
-                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
-                      <label 
-                        htmlFor={`upload-${artwork.id}`} 
-                        className="cursor-pointer bg-black/70 border border-purple-500/30 backdrop-blur-sm rounded-full p-2 hover:bg-purple-900/30 transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                        </svg>
-                        <input
-                          type="file"
-                          id={`upload-${artwork.id}`}
-                          accept="image/*"
-                          onChange={(e) => handleUpload(e, artwork.id)}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  )}
                 </motion.div>
               );
             })}
@@ -533,7 +557,7 @@ export default function ArtGalleryPage() {
         </div>
       </section>
 
-      {/* Artist Stories Section - Vertical timeline */}
+      {/* Artist Stories Section */}
       <section className="py-20 px-4 bg-gradient-to-b from-purple-900/20 to-black relative overflow-hidden">
         <div className="max-w-4xl mx-auto relative z-10">
           <motion.h2 
@@ -674,7 +698,7 @@ export default function ArtGalleryPage() {
         </div>
       </footer>
 
-      {/* Floating status indicator */}
+      {/* Status Toast */}
       <AnimatePresence>
         {status && (
           <motion.div
