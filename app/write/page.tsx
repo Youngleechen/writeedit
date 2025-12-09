@@ -690,42 +690,45 @@ export default function WritePage() {
 
   captureHistoryState();
   setIsAiOperation(true);
-
-  const title = titleRef.current.value.trim() || 'a new story';
+  const title = titleRef.current.value.trim() || 'Untitled';
   const fullContent = canvasRef.current.textContent?.trim() || '';
   const isEmpty = !fullContent;
 
-  let prompt: string;
+  // ✅ Extract last ~250 characters (or last 2-3 sentences) for context
+  let context = '';
+  if (!isEmpty) {
+    // Get last 250 chars, but try to avoid cutting mid-sentence
+    const cutoff = fullContent.length > 250 ? fullContent.length - 250 : 0;
+    context = fullContent.slice(cutoff).trim();
+    // Optional: extend slightly to end at a sentence boundary
+    const lastSentenceEnd = Math.max(
+      context.lastIndexOf('. '),
+      context.lastIndexOf('! '),
+      context.lastIndexOf('? ')
+    );
+    if (lastSentenceEnd > 100) {
+      context = context.slice(lastSentenceEnd + 1).trim(); // keep recent complete sentences
+    }
+  }
 
+  let prompt = '';
   if (isEmpty) {
-    // Start fresh — avoid using "Untitled Draft" as meaningful title
-    const effectiveTitle = title === 'Untitled Draft' ? 'a new story' : title;
-    prompt = `You are a master storyteller. Write exactly one vivid, engaging, grammatically correct English sentence to begin a story titled "${effectiveTitle}". DO NOT use quotation marks, markdown, bullet points, subtitles, JSON, or explanations. Return ONLY the sentence itself, ending with a period.`;
+    prompt = `You are a master storyteller. Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`;
   } else {
-    // ✅ CRITICAL: Include actual user text (last 250 chars) as narrative context
-    const context = fullContent.length > 250
-      ? fullContent.slice(-250).trim()
-      : fullContent;
-
-    prompt = `You are a master storyteller. Continue the following narrative in exactly one natural, flowing, grammatically correct English sentence. DO NOT summarize, conclude, add commentary, or introduce abrupt new ideas. Maintain the existing tone and style. DO NOT use quotes, markdown, JSON, bullet points, titles, or extra text. Return ONLY the sentence, ending with a period.\n\nNarrative so far: "${context}"`;
+    // ✅ Now include actual prior content as context
+    prompt = `You are a master storyteller. Continue the following narrative in a natural, flowing way. Maintain the tone, style, and direction. Title: "${title}". Previous text:\n\n"${context}"\n\nWrite ONLY ONE sentence that follows seamlessly. DO NOT summarize, conclude, or add commentary. DO NOT use quotes, markdown, or JSON. Return ONLY the sentence, ending with a period.`;
   }
 
   try {
     updateAutosaveStatus('✨ Generating spark...', 'saving');
-
-    // ✅ Keep using `instruction` (since your other modes work with it)
-    // ✅ Also include `input` as fallback context (harmless if unused)
     const data = await callAiApi({
-      input: fullContent,        // ← helpful if API uses it
-      instruction: prompt,       // ← your working field
+      instruction: prompt,
       model: 'x-ai/grok-4.1-fast:free',
       editLevel: 'generate',
     });
 
-    // Extract and clean response
     let text = data.generatedPost?.content || data.generatedPost || data.editedText || '';
 
-    // Handle accidental JSON wrappers
     if (text.startsWith('{') && text.endsWith('}')) {
       try {
         const parsed = JSON.parse(text);
@@ -733,27 +736,17 @@ export default function WritePage() {
       } catch {}
     }
 
-    // Extract first proper sentence
-    let sentence = '';
     const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
-    if (firstSentenceMatch) {
-      sentence = firstSentenceMatch[0];
-    } else {
-      sentence = (text.split('\n')[0] || '').trim();
-      if (sentence && !/[.!?]$/.test(sentence)) {
-        sentence += '.';
-      }
-    }
+    let sentence = firstSentenceMatch
+      ? firstSentenceMatch[0]
+      : (text.split('\n')[0] || 'A new beginning.').trim();
+    if (!sentence.endsWith('.') && !sentence.endsWith('!') && !sentence.endsWith('?')) sentence += '.';
 
-    if (!sentence.trim()) {
-      sentence = 'And so the story continued.';
-    }
-
-    // Apply the spark
     setIsApplyingHistory(true);
     if (isEmpty) {
       canvasRef.current.textContent = sentence + ' ';
     } else {
+      // Insert at cursor or end
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
@@ -763,18 +756,16 @@ export default function WritePage() {
         selection.removeAllRanges();
         selection.addRange(range);
       } else {
+        // Append at end
         canvasRef.current.textContent += ' ' + sentence + ' ';
       }
     }
     setIsApplyingHistory(false);
-
-    // Final updates
     captureHistoryState();
     setIsDirty(true);
     updateWordCount();
     updateAutosaveStatus('Spark inserted!', 'saved');
     showToast('✨ One-sentence spark added!', 'success');
-
   } catch (err) {
     console.error('Spark failed:', err);
     showToast('AI spark failed – try again', 'error');
