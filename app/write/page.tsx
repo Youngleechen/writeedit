@@ -584,6 +584,7 @@ export default function WritePage() {
       font-family: var(--font-spectral), serif;
       font-size: 1.05em;
       line-height: 1.6;
+      color: #333; /* Ensure dark text for readability */
     `;
     picker.innerHTML = `
       <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
@@ -591,7 +592,7 @@ export default function WritePage() {
         <button id="picker-cancel" style="background:#f5f5f5; border:1px solid #ddd; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:1.2em;">✕</button>
       </div>
       <div style="margin-bottom: 12px; color: #666; font-size: 0.95em;">Original:</div>
-      <div style="background:#f9f9f9; padding:12px; border-radius:6px; margin-bottom:20px; font-style:italic;">${escapeHtml(originalText)}</div>
+      <div style="background:#f9f9f9; padding:12px; border-radius:6px; margin-bottom:20px; font-style:italic; color: #333;">${escapeHtml(originalText)}</div>
       <div id="variations-list"></div>
     `;
     const list = picker.querySelector('#variations-list')!;
@@ -602,12 +603,12 @@ export default function WritePage() {
         const item = document.createElement('div');
         item.style.cssText = `
           padding: 12px;
-          border: 1px solid #eee;
+          border: 1px solid #ddd; /* Slightly darker border for clarity */
           border-radius: 6px;
           margin-bottom: 10px;
           cursor: pointer;
-          color: #000;
-          transition: background 0.2s;
+          color: #333; /* Ensure dark text for readability */
+          transition: background 0.2s, border-color 0.2s;
         `;
         item.textContent = text;
         item.addEventListener('click', () => {
@@ -615,8 +616,14 @@ export default function WritePage() {
           variationPickerRef.current = null;
           onChoose(text);
         });
-        item.addEventListener('mouseenter', () => item.style.background = '#f0f7ff');
-        item.addEventListener('mouseleave', () => item.style.background = '');
+        item.addEventListener('mouseenter', () => {
+          item.style.background = '#f0f7ff';
+          item.style.borderColor = '#007bff'; /* Highlight border on hover */
+        });
+        item.addEventListener('mouseleave', () => {
+          item.style.background = '';
+          item.style.borderColor = '#ddd';
+        });
         list.appendChild(item);
       });
     if (list.children.length === 0) {
