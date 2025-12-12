@@ -64,11 +64,7 @@ export default function AuthPage() {
             emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
         });
-        if (error) throw error;
-        setMessage({
-          type: 'success',
-          text: 'Account created! Check your email for confirmation.',
-        });
+        
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
