@@ -1,10 +1,10 @@
+// app/auth/[mode]/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -12,8 +12,7 @@ const supabase = createClient(
 
 export default function AuthPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const mode = searchParams.get('mode') || 'signin'; // 'signin' or 'signup'
+  const { mode } = useParams(); // 👈 This reads /auth/signin or /auth/signup
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,6 +30,7 @@ export default function AuthPage() {
     checkSession();
   }, [router]);
 
+  // Validate form
   const validate = () => {
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
       setMessage({ type: 'error', text: 'Please enter a valid email.' });
@@ -70,7 +70,6 @@ export default function AuthPage() {
           text: 'Account created! Check your email for confirmation.',
         });
       } else {
-        // Sign in with email + password
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         router.push('/portfolio');
@@ -189,7 +188,6 @@ export default function AuthPage() {
         </div>
       </div>
 
-      {/* Optional: Add global styles if needed */}
       <style jsx global>{`
         body {
           margin: 0;
@@ -229,15 +227,15 @@ const styles = {
     border: '1px solid #e5e7eb',
   },
   title: {
-    fontSize: '1.875rem', // 30px
+    fontSize: '1.875rem',
     fontWeight: 700,
-    color: '#111827', // gray-900
+    color: '#111827',
     textAlign: 'center' as const,
     marginBottom: '0.5rem',
   },
   subtitle: {
     fontSize: '1rem',
-    color: '#6b7280', // gray-500
+    color: '#6b7280',
     textAlign: 'center' as const,
     marginBottom: '1.5rem',
   },
@@ -252,24 +250,24 @@ const styles = {
     gap: '0.5rem',
   },
   label: {
-    fontSize: '0.875rem', // 14px
+    fontSize: '0.875rem',
     fontWeight: 600,
-    color: '#374151', // gray-700
+    color: '#374151',
   },
   input: {
     padding: '0.75rem',
     borderRadius: '8px',
-    border: '1px solid #d1d5db', // gray-300
+    border: '1px solid #d1d5db',
     fontSize: '1rem',
     backgroundColor: 'white',
-    color: '#111827', // DARK TEXT — fixes invisible typing!
+    color: '#111827',
     transition: 'border-color 0.2s, box-shadow 0.2s',
   },
   forgotPassword: {
     alignSelf: 'flex-end',
     background: 'none',
     border: 'none',
-    color: '#3b82f6', // indigo-500
+    color: '#3b82f6',
     fontSize: '0.875rem',
     cursor: 'pointer',
     padding: 0,
@@ -281,7 +279,7 @@ const styles = {
     fontSize: '1rem',
     fontWeight: 600,
     color: 'white',
-    backgroundColor: '#3b82f6', // indigo-500
+    backgroundColor: '#3b82f6',
     border: 'none',
     cursor: 'pointer',
     transition: 'background-color 0.2s',
