@@ -108,7 +108,7 @@ export default function VisionPage() {
               placeholder="What's in this image? Describe the scene, objects, or people..."
               style={{
                 width: '100%',
-                padding: '0.75rem',
+                padding: '0.81rem',
                 border: '1px solid #ddd',
                 borderRadius: '8px',
                 fontSize: '1rem',
