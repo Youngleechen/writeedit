@@ -1,15 +1,17 @@
-// app/api/edit/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { splitIntoChunks } from '@/lib/chunking';
 import { getSystemPrompt } from '@/lib/ai';
 
 const ALLOWED_MODELS = [
-  'allenai/olmo-3.1-32b-think:free',
   'mistralai/devstral-2512:free',
   'kwaipilot/kat-coder-pro:free',
   'openai/gpt-oss-20b:free',
   'tngtech/deepseek-r1t2-chimera:free'
 ];
+
+// Maximum words per chunk (optimized for speed + context limits)
+const MAX_CHUNK_WORDS = 800;
+// Hard limit for single-request processing
+const MAX_SINGLE_REQUEST_WORDS = 2000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,18 +22,17 @@ export async function POST(req: NextRequest) {
       model: preferredModel,
       editLevel,
       useEditorialBoard = false,
-      numVariations = 1 // 🔥 Read this from request
+      numVariations = 1,
+      chunkIndex = -1, // New: -1 means full doc, >=0 means single chunk
+      totalChunks = 1   // New: only relevant when chunkIndex >=0
     } = body;
 
-    // Clamp numVariations between 1 and 3 (to control cost/latency)
-    const variationCount = Math.min(3, Math.max(1, Math.floor(numVariations)));
-
-    // Instruction is always required
+    // Validate instruction
     if (!instruction?.trim()) {
       return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
     }
 
-    // Input is only required for editing (not for generation like "Spark")
+    // Input required except for generation mode
     if (editLevel !== 'generate' && !input?.trim()) {
       return NextResponse.json({ error: 'Input required' }, { status: 400 });
     }
@@ -41,7 +42,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Server config error' }, { status: 500 });
     }
 
-    // Build fallback order: preferred first, then others
+    // Determine processing mode
+    const isChunkRequest = chunkIndex >= 0;
+    const wordCount = input.trim().split(/\s+/).length;
+    
+    // For chunk requests: disable variations and editorial board
+    const effectiveVariations = isChunkRequest ? 1 : Math.min(3, Math.max(1, Math.floor(numVariations)));
+    const effectiveEditorial = isChunkRequest ? false : useEditorialBoard;
+
+    // For full documents over limit: reject and force frontend chunking
+    if (!isChunkRequest && wordCount > MAX_SINGLE_REQUEST_WORDS) {
+      return NextResponse.json({ 
+        error: `Document exceeds ${MAX_SINGLE_REQUEST_WORDS} word limit. Please process in chunks.`,
+        requiresChunking: true,
+        maxChunkWords: MAX_CHUNK_WORDS
+      }, { status: 413 });
+    }
+
+    // For chunks over limit: reject immediately
+    if (isChunkRequest && wordCount > MAX_CHUNK_WORDS * 1.2) { // 20% buffer
+      return NextResponse.json({ 
+        error: `Chunk exceeds ${MAX_CHUNK_WORDS} word limit. Please split smaller.` 
+      }, { status: 413 });
+    }
+
+    // Model fallback logic
     const modelOrder = [
       preferredModel,
       ...ALLOWED_MODELS.filter(m => m !== preferredModel)
@@ -53,40 +78,45 @@ export async function POST(req: NextRequest) {
 
     for (const model of modelOrder) {
       try {
-        const wordCount = input?.trim().split(/\s+/).length || 0;
-        if (wordCount >= 1000) {
-          // For large docs, we don’t support variations (too expensive)
-          const single = await processChunkedEditWithModel(
-            input || '',
+        if (effectiveEditorial) {
+          // Single-pass with self-refinement
+          const refined = await runSelfRefinementLoop(
+            input,
+            instruction,
+            model,
+            OPENROUTER_API_KEY,
+            effectiveVariations > 1 ? 0.7 : 0.5 // Lower temp for editorial
+          );
+          variationsResult = [refined];
+        } else if (effectiveVariations > 1) {
+          // Generate variations
+          const promises = Array.from({ length: effectiveVariations }, (_, i) => 
+            callModelWithTemp(
+              input,
+              instruction,
+              model,
+              editLevel,
+              OPENROUTER_API_KEY,
+              0.7 + (i * 0.2),
+              false
+            )
+          );
+          
+          const results = await Promise.all(promises);
+          const unique = [...new Set(results.map(r => r.trim()))].filter(Boolean);
+          variationsResult = unique.length > 0 ? unique : [results[0]];
+        } else {
+          // Single variation
+          const single = await callModelWithTemp(
+            input,
             instruction,
             model,
             editLevel,
-            useEditorialBoard,
-            OPENROUTER_API_KEY
+            OPENROUTER_API_KEY,
+            0.7,
+            false
           );
           variationsResult = [single];
-        } else {
-          // 🔥 Generate multiple variations (unless chunked)
-          const promises = [];
-          for (let i = 0; i < variationCount; i++) {
-            // Slightly different temperature per variation for diversity
-            const temperature = 0.7 + (i * 0.2); // e.g., 0.7, 0.9, 1.1
-            promises.push(
-              callModelWithTemp(
-                input || '',
-                instruction,
-                model,
-                editLevel,
-                OPENROUTER_API_KEY,
-                temperature,
-                useEditorialBoard
-              )
-            );
-          }
-          const results = await Promise.all(promises);
-          // Dedupe & filter empty
-          const unique = [...new Set(results.map(r => r.trim()))].filter(Boolean);
-          variationsResult = unique.length > 0 ? unique : [results[0]];
         }
         usedModel = model;
         break;
@@ -105,17 +135,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // For backward compatibility + UI
+    // Only generate tracked changes for non-chunk requests
     const primary = variationsResult[0];
-    const { html: trackedHtml, changes } = generateTrackedChanges(input || '', primary);
+    const trackedData = isChunkRequest 
+      ? { html: primary, changes: 0 }
+      : generateTrackedChanges(input, primary);
 
     return NextResponse.json({
       editedText: primary,
-      variations: variationsResult, // ✅ Now included!
-      trackedHtml,
-      changes,
+      variations: variationsResult,
+      trackedHtml: trackedData.html,
+      changes: trackedData.changes,
       usedModel,
-      variationCount: variationsResult.length
+      variationCount: variationsResult.length,
+      isChunk: isChunkRequest,
+      chunkIndex: isChunkRequest ? chunkIndex : undefined,
+      totalChunks: isChunkRequest ? totalChunks : undefined
     });
 
   } catch (err: unknown) {
@@ -125,7 +160,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// --- Updated: callModel now accepts temperature ---
+// --- Core processing functions (unchanged but simplified) ---
 async function callModelWithTemp(
   text: string,
   instruction: string,
@@ -135,9 +170,6 @@ async function callModelWithTemp(
   temperature: number,
   useEditorialBoard: boolean
 ): Promise<string> {
-  if (useEditorialBoard) {
-    return runSelfRefinementLoop(text, instruction, model, apiKey, temperature);
-  }
   const system = getSystemPrompt(editLevel as any, instruction);
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -153,9 +185,8 @@ async function callModelWithTemp(
         { role: 'system', content: system },
         { role: 'user', content: text }
       ],
-      max_tokens: 1000,
+      max_tokens: 1200, // Increased for chunk safety
       temperature,
-      // Some models require this for non-determinism
       top_p: temperature > 0.8 ? 0.95 : 0.9
     })
   });
@@ -174,7 +205,6 @@ async function callModelWithTemp(
   return content;
 }
 
-// --- Updated self-refinement to accept temperature ---
 async function runSelfRefinementLoop(
   original: string,
   instruction: string,
@@ -190,32 +220,7 @@ async function runSelfRefinementLoop(
   return current;
 }
 
-// --- Chunked Processing (unchanged — returns single string) ---
-async function processChunkedEditWithModel(
-  input: string,
-  instruction: string,
-  model: string,
-  editLevel: string,
-  useEditorialBoard: boolean,
-  apiKey: string
-): Promise<string> {
-  const chunks = splitIntoChunks(input);
-  const editedChunks: string[] = [];
-
-  for (const chunk of chunks) {
-    let edited: string;
-    if (useEditorialBoard) {
-      edited = await runSelfRefinementLoop(chunk, instruction, model, apiKey, 0.8);
-    } else {
-      edited = await callModelWithTemp(chunk, instruction, model, editLevel, apiKey, 0.8, false);
-    }
-    editedChunks.push(edited);
-  }
-
-  return editedChunks.join('\n\n');
-}
-
-// --- DIFF GENERATION (unchanged) ---
+// --- DIFF GENERATION (optimized) ---
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -224,8 +229,8 @@ function escapeHtml(text: string): string {
 }
 
 function generateTrackedChanges(original: string, edited: string): { html: string; changes: number } {
-  const words1 = original.split(/\s+/);
-  const words2 = edited.split(/\s+/);
+  const words1 = original.split(/\s+/).filter(w => w);
+  const words2 = edited.split(/\s+/).filter(w => w);
   const html: string[] = [];
   let i = 0, j = 0;
   let changes = 0;
@@ -238,16 +243,27 @@ function generateTrackedChanges(original: string, edited: string): { html: strin
     } else {
       const startI = i;
       const startJ = j;
+      
+      // Find next match within reasonable distance
+      const maxLookahead = 10;
+      let lookahead = 0;
       while (
-        (i < words1.length && j < words2.length && words1[i] !== words2[j]) ||
-        (i < words1.length && j >= words2.length) ||
-        (i >= words1.length && j < words2.length)
+        (i < words1.length && j < words2.length && words1[i] !== words2[j]) &&
+        lookahead < maxLookahead
       ) {
         if (i < words1.length) i++;
         if (j < words2.length) j++;
+        lookahead++;
       }
+      
+      // If we found a match, step back to process differences
+      if (i < words1.length && j < words2.length && words1[i] === words2[j]) {
+        i--; j--;
+      }
+      
       const deleted = words1.slice(startI, i).map(escapeHtml).join(' ');
       const inserted = words2.slice(startJ, j).map(escapeHtml).join(' ');
+      
       if (deleted || inserted) {
         changes++;
         let group = '';
