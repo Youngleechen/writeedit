@@ -4,11 +4,11 @@ import { splitIntoChunks } from '@/lib/chunking';
 import { getSystemPrompt } from '@/lib/ai';
 
 const ALLOWED_MODELS = [
-  'x-ai/grok-4.1-fast:free',
-  'alibaba/tongyi-deepresearch-30b-a3b:free',
+  'allenai/olmo-3.1-32b-think:free',
+  'mistralai/devstral-2512:free',
   'kwaipilot/kat-coder-pro:free',
-  'anthropic/claude-3.5-sonnet:free',
-  'google/gemini-flash-1.5-8b:free'
+  'openai/gpt-oss-20b:free',
+  'tngtech/deepseek-r1t2-chimera:free'
 ];
 
 export async function POST(req: NextRequest) {
@@ -205,9 +205,9 @@ async function processChunkedEditWithModel(
   for (const chunk of chunks) {
     let edited: string;
     if (useEditorialBoard) {
-      edited = await runSelfRefinementLoop(chunk, instruction, model, apiKey, 0.7);
+      edited = await runSelfRefinementLoop(chunk, instruction, model, apiKey, 0.8);
     } else {
-      edited = await callModelWithTemp(chunk, instruction, model, editLevel, apiKey, 0.7, false);
+      edited = await callModelWithTemp(chunk, instruction, model, editLevel, apiKey, 0.8, false);
     }
     editedChunks.push(edited);
   }
