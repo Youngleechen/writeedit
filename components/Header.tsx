@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase-client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+const LOGIN_PROMPT_DISMISSED_KEY = 'login_prompt_dismissed_until';
+
 export function Header() {
   const [user, setUser] = useState<any>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -30,15 +32,26 @@ export function Header() {
         if (loginPromptTimeoutRef.current) {
           clearTimeout(loginPromptTimeoutRef.current);
         }
+        // Also clear localStorage flag on login
+        localStorage.removeItem(LOGIN_PROMPT_DISMISSED_KEY);
       }
     });
 
-    // Set a 5-second delay to show login prompt if not logged in
-    loginPromptTimeoutRef.current = setTimeout(() => {
-      if (!user) {
-        setShowLoginPrompt(true);
+    const checkLoginPromptEligibility = () => {
+      const dismissedUntil = localStorage.getItem(LOGIN_PROMPT_DISMISSED_KEY);
+      const now = Date.now();
+
+      if (!dismissedUntil || now >= parseInt(dismissedUntil, 10)) {
+        // Eligible to show again
+        loginPromptTimeoutRef.current = setTimeout(() => {
+          if (!user) {
+            setShowLoginPrompt(true);
+          }
+        }, 5000);
       }
-    }, 5000);
+    };
+
+    checkLoginPromptEligibility();
 
     return () => {
       subscription.unsubscribe();
@@ -50,12 +63,10 @@ export function Header() {
 
   const handleAuth = () => {
     if (user) {
-      // Logout
       supabase.auth.signOut().then(() => {
         router.refresh();
       });
     } else {
-      // Redirect to sign-in page
       router.push('/auth/signin');
     }
   };
@@ -65,6 +76,9 @@ export function Header() {
     if (loginPromptTimeoutRef.current) {
       clearTimeout(loginPromptTimeoutRef.current);
     }
+    // Set dismissal for 24 hours
+    const twentyFourHoursFromNow = Date.now() + 24 * 60 * 60 * 1000;
+    localStorage.setItem(LOGIN_PROMPT_DISMISSED_KEY, twentyFourHoursFromNow.toString());
   };
 
   const navItems = [
@@ -169,26 +183,24 @@ export function Header() {
 
       {/* Login Prompt Modal */}
       {showLoginPrompt && !user && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center px-4 pb-4 sm:p-6">
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center px-4 pb-6 pt-12 sm:p-6">
           <div
-            className="fixed inset-0 transition-opacity"
+            className="fixed inset-0 bg-gray-900 bg-opacity-60 transition-opacity"
             aria-hidden="true"
             onClick={dismissPrompt}
-          >
-            <div className="absolute inset-0 bg-gray-900 opacity-50"></div>
-          </div>
+          />
 
-          <div className="relative bg-white rounded-xl shadow-lg p-6 max-w-md w-full transform transition-all">
+          <div className="relative bg-white rounded-xl shadow-xl p-6 max-w-md w-full transform transition-all duration-300 ease-out scale-95 animate-in fade-in zoom-in">
             <div className="flex justify-between items-start">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Welcome!</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Welcome to Before Publishing!</h3>
                 <p className="mt-2 text-sm text-gray-600">
-                  To access all features like saving drafts or managing your portfolio, please log in.
+                  Sign in to save drafts, manage your portfolio, and unlock all features.
                 </p>
               </div>
               <button
                 onClick={dismissPrompt}
-                className="text-gray-400 hover:text-gray-500"
+                className="text-gray-400 hover:text-gray-600 rounded-full p-1 transition-colors"
                 aria-label="Close"
               >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -196,11 +208,11 @@ export function Header() {
                 </svg>
               </button>
             </div>
-            <div className="mt-4 flex justify-end space-x-3">
+            <div className="mt-5 flex justify-end space-x-3">
               <button
                 type="button"
                 onClick={dismissPrompt}
-                className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
+                className="px-3.5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 Maybe Later
               </button>
@@ -210,7 +222,7 @@ export function Header() {
                   dismissPrompt();
                   handleAuth();
                 }}
-                className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm"
+                className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm hover:shadow transition-colors"
               >
                 Log In
               </button>

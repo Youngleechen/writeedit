@@ -11,6 +11,12 @@ const ALLOWED_MODELS = [
   'google/gemini-flash-1.5-8b:free'
 ];
 
+// Vercel has a 10s timeout for Hobby plan, 60s for Pro
+// We'll set our timeout to 25s to leave room for processing
+const API_TIMEOUT = 25000; // 25 seconds
+const MAX_RETRIES = 2;
+const BASE_DELAY = 1000; // 1 second
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -20,10 +26,10 @@ export async function POST(req: NextRequest) {
       model: preferredModel,
       editLevel,
       useEditorialBoard = false,
-      numVariations = 1 // 🔥 Read this from request
+      numVariations = 1
     } = body;
 
-    // Clamp numVariations between 1 and 3 (to control cost/latency)
+    // Clamp numVariations between 1 and 3
     const variationCount = Math.min(3, Math.max(1, Math.floor(numVariations)));
 
     // Instruction is always required
@@ -55,7 +61,7 @@ export async function POST(req: NextRequest) {
       try {
         const wordCount = input?.trim().split(/\s+/).length || 0;
         if (wordCount >= 1000) {
-          // For large docs, we don’t support variations (too expensive)
+          // For large docs, we don't support variations
           const single = await processChunkedEditWithModel(
             input || '',
             instruction,
@@ -66,11 +72,10 @@ export async function POST(req: NextRequest) {
           );
           variationsResult = [single];
         } else {
-          // 🔥 Generate multiple variations (unless chunked)
+          // Generate multiple variations
           const promises = [];
           for (let i = 0; i < variationCount; i++) {
-            // Slightly different temperature per variation for diversity
-            const temperature = 0.7 + (i * 0.2); // e.g., 0.7, 0.9, 1.1
+            const temperature = 0.7 + (i * 0.2);
             promises.push(
               callModelWithTemp(
                 input || '',
@@ -84,7 +89,6 @@ export async function POST(req: NextRequest) {
             );
           }
           const results = await Promise.all(promises);
-          // Dedupe & filter empty
           const unique = [...new Set(results.map(r => r.trim()))].filter(Boolean);
           variationsResult = unique.length > 0 ? unique : [results[0]];
         }
@@ -111,7 +115,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       editedText: primary,
-      variations: variationsResult, // ✅ Now included!
+      variations: variationsResult,
       trackedHtml,
       changes,
       usedModel,
@@ -125,7 +129,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// --- Updated: callModel now accepts temperature ---
+// Updated: callModel now handles timeouts and retries
 async function callModelWithTemp(
   text: string,
   instruction: string,
@@ -133,48 +137,88 @@ async function callModelWithTemp(
   editLevel: string,
   apiKey: string,
   temperature: number,
-  useEditorialBoard: boolean
+  useEditorialBoard: boolean,
+  retries = MAX_RETRIES,
+  delay = BASE_DELAY
 ): Promise<string> {
   if (useEditorialBoard) {
     return runSelfRefinementLoop(text, instruction, model, apiKey, temperature);
   }
-  const system = getSystemPrompt(editLevel as any, instruction);
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://beforepublishing.vercel.app',
-      'X-Title': 'Before Publishing'
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: text }
-      ],
-      max_tokens: 1000,
-      temperature,
-      // Some models require this for non-determinism
-      top_p: temperature > 0.8 ? 0.95 : 0.9
-    })
-  });
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
-  if (!res.ok) {
-    const errJson = await res.json().catch(() => ({}));
-    const errorMsg = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
-    throw new Error(errorMsg);
-  }
+    const system = getSystemPrompt(editLevel as any, instruction);
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://beforepublishing.vercel.app',
+        'X-Title': 'Before Publishing'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: text }
+        ],
+        max_tokens: 1000,
+        temperature,
+        top_p: temperature > 0.8 ? 0.95 : 0.9
+      }),
+      signal: controller.signal
+    });
 
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error('Model returned empty content');
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      const errorMsg = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+      
+      // Handle 504 specifically
+      if (res.status === 504) {
+        throw new Error('OpenRouter API timed out. Please try again.');
+      }
+      
+      throw new Error(errorMsg);
+    }
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error('Model returned empty content');
+    }
+    return content;
+  } catch (err) {
+    if (retries > 0 && (err instanceof Error) && 
+        (err.name === 'AbortError' || err.message.includes('timed out') || 
+         err.message.includes('Failed to fetch') || err.message.includes('504'))) {
+      
+      // Exponential backoff
+      const nextDelay = delay * 2;
+      console.log(`Timeout error. Retrying in ${nextDelay}ms... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, nextDelay));
+      
+      return callModelWithTemp(
+        text, 
+        instruction, 
+        model, 
+        editLevel, 
+        apiKey, 
+        temperature, 
+        useEditorialBoard,
+        retries - 1,
+        nextDelay
+      );
+    }
+    
+    throw err;
   }
-  return content;
 }
 
-// --- Updated self-refinement to accept temperature ---
+// Updated self-refinement to accept temperature
 async function runSelfRefinementLoop(
   original: string,
   instruction: string,
@@ -190,7 +234,7 @@ async function runSelfRefinementLoop(
   return current;
 }
 
-// --- Chunked Processing (unchanged — returns single string) ---
+// Optimized chunked processing with timeout handling
 async function processChunkedEditWithModel(
   input: string,
   instruction: string,
@@ -201,15 +245,26 @@ async function processChunkedEditWithModel(
 ): Promise<string> {
   const chunks = splitIntoChunks(input);
   const editedChunks: string[] = [];
+  const MAX_CONCURRENT = 2; // Limit concurrent requests to avoid rate limits
 
-  for (const chunk of chunks) {
-    let edited: string;
-    if (useEditorialBoard) {
-      edited = await runSelfRefinementLoop(chunk, instruction, model, apiKey, 0.7);
-    } else {
-      edited = await callModelWithTemp(chunk, instruction, model, editLevel, apiKey, 0.7, false);
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      let edited: string;
+      if (useEditorialBoard) {
+        edited = await runSelfRefinementLoop(chunks[i], instruction, model, apiKey, 0.7);
+      } else {
+        edited = await callModelWithTemp(chunks[i], instruction, model, editLevel, apiKey, 0.7, false);
+      }
+      editedChunks[i] = edited;
+    } catch (err) {
+      console.error(`Error processing chunk ${i}:`, err);
+      editedChunks[i] = chunks[i]; // Fallback to original chunk on error
     }
-    editedChunks.push(edited);
+
+    // Add small delay between chunks to avoid rate limits
+    if (i < chunks.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
   }
 
   return editedChunks.join('\n\n');

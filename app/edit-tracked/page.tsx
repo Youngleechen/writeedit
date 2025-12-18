@@ -4,6 +4,80 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEditor } from '@/hooks/useEditor';
 import { useDocument, SavedDocument } from '@/hooks/useDocument';
 
+// Web Worker for diff computation (prevents UI blocking)
+const DIFF_WORKER_CODE = `
+self.importScripts('https://unpkg.com/diff@5.1.0/dist/diff.min.js');
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+self.onmessage = function(e) {
+  const { original, edited, requestId } = e.data;
+  
+  try {
+    const diffs = Diff.diffWords(original, edited);
+    let html = '';
+    let groupContent = '';
+    let inGroup = false;
+
+    const flushGroup = (isChangeGroup) => {
+      if (groupContent) {
+        if (isChangeGroup) {
+          html += \`<span class="change-group">\${groupContent}</span>\`;
+        } else {
+          html += groupContent;
+        }
+        groupContent = '';
+      }
+      inGroup = false;
+    };
+
+    for (let i = 0; i < diffs.length; i++) {
+      const part = diffs[i];
+      if (!part.added && !part.removed) {
+        flushGroup(false);
+        html += escapeHtml(part.value);
+        continue;
+      }
+
+      if (!inGroup) {
+        groupContent = '';
+        inGroup = true;
+      }
+
+      if (part.removed) {
+        groupContent += \`<del>\${escapeHtml(part.value)}</del>\`;
+      } else if (part.added) {
+        groupContent += \`<ins>\${escapeHtml(part.value)}</ins>\`;
+      }
+
+      const next = diffs[i + 1];
+      if (!next || (!next.added && !next.removed)) {
+        flushGroup(true);
+      }
+    }
+    flushGroup(inGroup);
+    
+    self.postMessage({
+      requestId,
+      html: \`<div style="white-space:pre-wrap">\${html}</div>\`
+    });
+  } catch (err) {
+    console.error('Diff generation failed:', err);
+    self.postMessage({
+      requestId,
+      html: escapeHtml(edited)
+    });
+  }
+};
+`;
+
 export default function EditTrackedPage() {
   const editor = useEditor();
   const docManager = useDocument();
@@ -26,14 +100,24 @@ export default function EditTrackedPage() {
     setEditedText,
   } = editor;
 
+  // Performance-critical state
   const [currentDoc, setCurrentDoc] = useState<SavedDocument | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [trackedHtmlState, setTrackedHtmlState] = useState<string>('');
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
   const trackedRef = useRef<HTMLDivElement>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const requestIdRef = useRef(0);
   const isApplyingChangeRef = useRef(false);
   const originalTrackedHtmlRef = useRef<string>('');
+  const mutationObserverRef = useRef<MutationObserver | null>(null);
+  
+  // Virtualization parameters
+  const VIRTUALIZATION_THRESHOLD = 5000; // characters
+  const CHUNK_SIZE = 2000; // characters per chunk
+  const SCROLL_BUFFER = 600; // pixels
 
   // === Escape HTML safely ===
   const escapeHtml = useCallback((text: string): string => {
@@ -45,18 +129,51 @@ export default function EditTrackedPage() {
       .replace(/'/g, '&#039;');
   }, []);
 
-  // === Generate tracked HTML using diff (word-level) ===
-  const generateDiffHtml = useCallback((original: string, edited: string): string => {
-    if (typeof window === 'undefined') {
-      return escapeHtml(edited);
+  // === Initialize Web Worker ===
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const blob = new Blob([DIFF_WORKER_CODE], { type: 'application/javascript' });
+      workerRef.current = new Worker(URL.createObjectURL(blob));
+      
+      workerRef.current.onmessage = (e) => {
+        const { requestId, html } = e.data;
+        if (requestId === requestIdRef.current) {
+          setTrackedHtmlState(html);
+          setIsLoadingContent(false);
+        }
+      };
     }
 
-    const DiffLib = (window as any).Diff;
-    if (!DiffLib) {
-      return escapeHtml(edited);
-    }
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+    };
+  }, []);
 
+  // === Generate tracked HTML using worker ===
+  const generateTrackedHtml = useCallback(async (original: string, edited: string) => {
+    if (original.length + edited.length > VIRTUALIZATION_THRESHOLD) {
+      setIsLoadingContent(true);
+      requestIdRef.current++;
+      workerRef.current?.postMessage({ 
+        original, 
+        edited, 
+        requestId: requestIdRef.current 
+      });
+    } else {
+      // Small documents: compute directly
+      setTrackedHtmlState(generateDiffHtmlDirect(original, edited));
+    }
+  }, []);
+
+  // === Direct diff generation (small documents only) ===
+  const generateDiffHtmlDirect = useCallback((original: string, edited: string): string => {
     try {
+      const DiffLib = (window as any).Diff;
+      if (!DiffLib) return escapeHtml(edited);
+
       const diffs = DiffLib.diffWords(original, edited);
       let html = '';
       let groupContent = '';
@@ -106,67 +223,100 @@ export default function EditTrackedPage() {
     }
   }, [escapeHtml]);
 
-  // === Extract clean text from tracked HTML ===
+  // === Virtualized content rendering ===
+  const renderVirtualizedContent = useCallback((html: string) => {
+    if (!trackedRef.current) return;
+    
+    const contentDiv = trackedRef.current;
+    contentDiv.innerHTML = '';
+    
+    const innerMatch = html.match(/<div[^>]*>([\s\S]*?)<\/div>/);
+    const innerContent = innerMatch ? innerMatch[1] : html;
+    const chunks = innerContent.split(/(?=<span class="change-group">|<del>|<ins>)/);
+    const totalChunks = Math.ceil(chunks.length / CHUNK_SIZE);
+    
+    const container = document.createElement('div');
+    container.className = 'virtualized-container';
+    contentDiv.appendChild(container);
+    
+    const renderChunk = (index: number) => {
+      const chunk = chunks.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE).join('');
+      const chunkDiv = document.createElement('div');
+      chunkDiv.className = `chunk-${index}`;
+      chunkDiv.innerHTML = chunk;
+      container.appendChild(chunkDiv);
+    };
+    
+    // Initial render of visible chunks
+    const visibleChunks = Math.ceil((window.innerHeight + SCROLL_BUFFER * 2) / 20);
+    for (let i = 0; i < Math.min(totalChunks, visibleChunks); i++) {
+      renderChunk(i);
+    }
+    
+    // Scroll handler for dynamic loading
+    const handleScroll = () => {
+      const scrollTop = contentDiv.scrollTop;
+      const visibleStart = Math.floor(scrollTop / 20 / CHUNK_SIZE);
+      const visibleEnd = Math.ceil((scrollTop + window.innerHeight) / 20 / CHUNK_SIZE);
+      
+      // Clean up distant chunks
+      Array.from(container.children).forEach(child => {
+        const chunkIndex = parseInt((child as HTMLElement).className.split('-')[1], 10);
+        if (chunkIndex < visibleStart - 1 || chunkIndex > visibleEnd + 1) {
+          container.removeChild(child);
+        }
+      });
+      
+      // Render missing chunks
+      for (let i = visibleStart; i <= visibleEnd; i++) {
+        if (!container.querySelector(`.chunk-${i}`)) {
+          renderChunk(i);
+        }
+      }
+    };
+    
+    contentDiv.addEventListener('scroll', handleScroll);
+    return () => contentDiv.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // === Extract clean text efficiently ===
   const updateCleanFromTracked = useCallback(() => {
     if (!trackedRef.current) return;
-    const clone = trackedRef.current.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('.change-action, .change-group').forEach((el) => el.remove());
-    clone.querySelectorAll('del').forEach((el) => el.remove());
-    clone.querySelectorAll('ins').forEach((el) => {
-      const parent = el.parentNode!;
-      while (el.firstChild) parent.insertBefore(el.firstChild, el);
-      parent.removeChild(el);
-    });
-    const newText = clone.textContent || '';
+    
+    const range = document.createRange();
+    range.selectNodeContents(trackedRef.current);
+    const fragments = range.cloneContents();
+    
+    // Process changes in batches
+    const processBatch = (nodes: Node[], batchSize = 100) => {
+      for (let i = 0; i < nodes.length; i += batchSize) {
+        const batch = nodes.slice(i, i + batchSize);
+        batch.forEach(node => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as HTMLElement;
+            if (el.classList.contains('change-group') || el.tagName === 'DEL' || el.tagName === 'INS') {
+              if (el.tagName === 'INS') {
+                Array.from(el.childNodes).forEach(child => {
+                  el.parentNode?.insertBefore(child, el);
+                });
+              }
+              el.remove();
+            }
+          }
+        });
+      }
+    };
+    
+    processBatch(Array.from(fragments.childNodes));
+    const newText = fragments.textContent || '';
     setEditedText(newText);
+    setUnsavedChanges(true);
   }, [setEditedText]);
 
-  // === Apply accept or reject ===
-  const applyChange = useCallback((group: HTMLElement, accept: boolean) => {
-    if (isApplyingChangeRef.current) return;
-    isApplyingChangeRef.current = true;
-
-    if (accept) {
-      group.querySelectorAll('ins').forEach((ins) => {
-        const parent = ins.parentNode!;
-        while (ins.firstChild) parent.insertBefore(ins.firstChild, ins);
-        parent.removeChild(ins);
-      });
-      group.querySelectorAll('del').forEach((del) => del.remove());
-    } else {
-      group.querySelectorAll('del').forEach((del) => {
-        const parent = del.parentNode!;
-        while (del.firstChild) parent.insertBefore(del.firstChild, del);
-        parent.removeChild(del);
-      });
-      group.querySelectorAll('ins').forEach((ins) => ins.remove());
-    }
-
-    if (group.childNodes.length === 0) {
-      group.remove();
-    } else {
-      while (group.firstChild) {
-        group.parentNode!.insertBefore(group.firstChild, group);
-      }
-      group.remove();
-    }
-
-    updateCleanFromTracked();
-    setUnsavedChanges(true);
-
-    // Reattach handlers
-    setTimeout(() => {
-      if (trackedRef.current) {
-        attachAcceptRejectHandlers();
-      }
-    }, 0);
-
-    isApplyingChangeRef.current = false;
-  }, [updateCleanFromTracked]);
-
-  // === Attach accept/reject handlers ===
+  // === Attach accept/reject handlers (CORRECTED WITH useCallback) ===
   const attachAcceptRejectHandlers = useCallback(() => {
     if (!trackedRef.current) return;
+
     trackedRef.current.querySelectorAll('.change-action').forEach((el) => el.remove());
     trackedRef.current.querySelectorAll('.change-group').forEach((groupEl) => {
       if (groupEl.querySelector('.change-action')) return;
@@ -177,15 +327,57 @@ export default function EditTrackedPage() {
         <button class="reject-change" title="Reject">❌</button>
       `;
       groupEl.appendChild(action);
-      action.querySelector('.accept-change')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        applyChange(groupEl as HTMLElement, true);
-      });
-      action.querySelector('.reject-change')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        applyChange(groupEl as HTMLElement, false);
-      });
     });
+  }, []);
+
+  // === Apply accept or reject ===
+  const applyChange = useCallback((group: HTMLElement, accept: boolean) => {
+    if (isApplyingChangeRef.current) return;
+    isApplyingChangeRef.current = true;
+
+    const clone = group.cloneNode(true) as HTMLElement;
+
+    if (accept) {
+      clone.querySelectorAll('del').forEach((del) => del.remove());
+      clone.querySelectorAll('ins').forEach((ins) => {
+        while (ins.firstChild) {
+          ins.parentNode?.insertBefore(ins.firstChild, ins);
+        }
+        ins.remove();
+      });
+    } else {
+      clone.querySelectorAll('ins').forEach((ins) => ins.remove());
+      clone.querySelectorAll('del').forEach((del) => {
+        while (del.firstChild) {
+          del.parentNode?.insertBefore(del.firstChild, del);
+        }
+        del.remove();
+      });
+    }
+
+    requestAnimationFrame(() => {
+      group.parentNode?.replaceChild(clone, group);
+      updateCleanFromTracked();
+      attachAcceptRejectHandlers();
+      isApplyingChangeRef.current = false;
+    });
+  }, [updateCleanFromTracked, attachAcceptRejectHandlers]);
+
+  // === Event delegation for change actions ===
+  useEffect(() => {
+    const handleActionClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.classList.contains('accept-change') || target.classList.contains('reject-change')) {
+        e.stopPropagation();
+        const group = target.closest('.change-group');
+        if (group) {
+          applyChange(group as HTMLElement, target.classList.contains('accept-change'));
+        }
+      }
+    };
+
+    document.addEventListener('click', handleActionClick);
+    return () => document.removeEventListener('click', handleActionClick);
   }, [applyChange]);
 
   // === Handle deletion manually ===
@@ -194,51 +386,25 @@ export default function EditTrackedPage() {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
 
-    trackedRef.current.querySelectorAll('.change-action').forEach(el => el.remove());
-
-    let range;
-    if (selection.isCollapsed) {
-      range = selection.getRangeAt(0).cloneRange();
-      if (isForward) {
-        range.setEnd(range.endContainer, range.endOffset + 1);
-      } else {
-        if (range.startOffset === 0) return;
-        range.setStart(range.startContainer, range.startOffset - 1);
-      }
-      if (range.toString().trim() === '') return;
-    } else {
-      range = selection.getRangeAt(0);
-      if (!range.toString().trim()) return;
-    }
-
-    selection.removeAllRanges();
-    selection.addRange(range);
-
-    const fragment = range.cloneContents();
-    if (!fragment.textContent?.trim()) return;
-
-    const tempDiv = document.createElement('div');
-    tempDiv.appendChild(fragment);
-    const safeText = tempDiv.textContent;
-
-    const del = document.createElement('del');
-    del.textContent = safeText;
+    const range = selection.getRangeAt(0).cloneRange();
+    if (!range.toString().trim()) return;
 
     const group = document.createElement('span');
     group.className = 'change-group';
+    const del = document.createElement('del');
+    del.textContent = range.toString();
     group.appendChild(del);
 
     range.deleteContents();
     range.insertNode(group);
 
-    const afterRange = document.createRange();
-    afterRange.setStart(range.startContainer, range.startOffset);
-    afterRange.collapse(true);
+    const newRange = document.createRange();
+    newRange.setStartAfter(group);
+    newRange.setEndAfter(group);
     selection.removeAllRanges();
-    selection.addRange(afterRange);
+    selection.addRange(newRange);
 
     updateCleanFromTracked();
-    setUnsavedChanges(true);
     attachAcceptRejectHandlers();
   }, [updateCleanFromTracked, attachAcceptRejectHandlers]);
 
@@ -249,8 +415,6 @@ export default function EditTrackedPage() {
     if (!selection || selection.rangeCount === 0) return;
 
     const range = selection.getRangeAt(0);
-    range.deleteContents();
-
     const ins = document.createElement('ins');
     ins.textContent = text;
 
@@ -258,6 +422,7 @@ export default function EditTrackedPage() {
     group.className = 'change-group';
     group.appendChild(ins);
 
+    range.deleteContents();
     range.insertNode(group);
 
     const newRange = document.createRange();
@@ -267,48 +432,46 @@ export default function EditTrackedPage() {
     selection.addRange(newRange);
 
     updateCleanFromTracked();
-    setUnsavedChanges(true);
     attachAcceptRejectHandlers();
   }, [updateCleanFromTracked, attachAcceptRejectHandlers]);
 
   // === Setup editing listeners ===
- useEffect(() => {
-  const el = trackedRef.current;
-  if (!el) return;
+  useEffect(() => {
+    const el = trackedRef.current;
+    if (!el) return;
 
-  const handleBeforeInput = (e: InputEvent) => {
-    if (isApplyingChangeRef.current) return;
-    if (e.inputType === 'insertText' && e.data) {
+    const handleBeforeInput = (e: InputEvent) => {
+      if (isApplyingChangeRef.current) return;
+      if (e.inputType === 'insertText' && e.data) {
+        e.preventDefault();
+        insertTrackedInsertion(e.data);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isApplyingChangeRef.current) return;
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        handleDeletion(e.key === 'Delete');
+      }
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
       e.preventDefault();
-      insertTrackedInsertion(e.data);
-    }
-    // Note: 'insertFromPaste' is handled by the 'paste' event, not here
-  };
+      const text = e.clipboardData?.getData('text/plain') || '';
+      insertTrackedInsertion(text);
+    };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (isApplyingChangeRef.current) return;
-    if (e.key === 'Backspace' || e.key === 'Delete') {
-      e.preventDefault();
-      handleDeletion(e.key === 'Delete');
-    }
-  };
+    el.addEventListener('beforeinput', handleBeforeInput);
+    el.addEventListener('keydown', handleKeyDown);
+    el.addEventListener('paste', handlePaste);
 
-  const handlePaste = (e: ClipboardEvent) => {
-    e.preventDefault();
-    const text = e.clipboardData?.getData('text/plain') || '';
-    insertTrackedInsertion(text);
-  };
-
-  el.addEventListener('beforeinput', handleBeforeInput);
-  el.addEventListener('keydown', handleKeyDown);
-  el.addEventListener('paste', handlePaste);
-
-  return () => {
-    el.removeEventListener('beforeinput', handleBeforeInput);
-    el.removeEventListener('keydown', handleKeyDown);
-    el.removeEventListener('paste', handlePaste);
-  };
-}, [insertTrackedInsertion, handleDeletion]);
+    return () => {
+      el.removeEventListener('beforeinput', handleBeforeInput);
+      el.removeEventListener('keydown', handleKeyDown);
+      el.removeEventListener('paste', handlePaste);
+    };
+  }, [insertTrackedInsertion, handleDeletion]);
 
   // === Load document ===
   const loadDocument = useCallback(
@@ -323,47 +486,46 @@ export default function EditTrackedPage() {
       setCurrentDoc(doc);
       setDocumentId(doc.id);
       setViewMode('tracked');
+      setIsLoadingContent(true);
 
-      const html = doc.tracked_html || generateDiffHtml(doc.original_text, doc.edited_text);
-      setTrackedHtmlState(html);
-      originalTrackedHtmlRef.current = html;
+      if (doc.tracked_html) {
+        setTrackedHtmlState(doc.tracked_html);
+        setIsLoadingContent(false);
+      } else {
+        generateTrackedHtml(doc.original_text, doc.edited_text);
+      }
+
+      originalTrackedHtmlRef.current = doc.tracked_html || '';
       setUnsavedChanges(false);
 
-      // Trigger DOM update, then attach handlers
+      // Trigger DOM update and attach handlers
       setTimeout(() => {
         if (trackedRef.current) {
-          trackedRef.current.innerHTML = html;
+          trackedRef.current.innerHTML = doc.tracked_html || trackedHtmlState;
           attachAcceptRejectHandlers();
         }
       }, 0);
     },
-    [editor, setDocumentId, setViewMode, generateDiffHtml, attachAcceptRejectHandlers]
+    [editor, setDocumentId, setViewMode, generateTrackedHtml, attachAcceptRejectHandlers, trackedHtmlState]
   );
 
   // === Save to backend ===
-  const saveProgress = async () => {
-    if (!documentId || !currentDoc) {
-      setSaveError('No active document to save');
-      return;
-    }
+  const saveProgress = useCallback(async () => {
+    if (!documentId || !currentDoc || !trackedRef.current || !unsavedChanges) return;
 
     setIsSaving(true);
     setSaveError(null);
 
     try {
-      const clean = externalEditedText; // already synced via updateCleanFromTracked
-      const trackedHtmlContent = trackedRef.current?.innerHTML || null;
+      const clean = externalEditedText;
+      const trackedHtmlContent = trackedRef.current.innerHTML;
 
-      await saveProgressToApi(
-        documentId,
-        clean,
-        inputText,
-        trackedHtmlContent ?? undefined
-      );
+      // Small debounce
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-      if (trackedRef.current) {
-        originalTrackedHtmlRef.current = trackedRef.current.innerHTML;
-      }
+      await saveProgressToApi(documentId, clean, inputText, trackedHtmlContent);
+
+      originalTrackedHtmlRef.current = trackedHtmlContent;
       setUnsavedChanges(false);
       alert('✅ Progress saved!');
     } catch (err: any) {
@@ -371,37 +533,50 @@ export default function EditTrackedPage() {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [documentId, currentDoc, externalEditedText, inputText, unsavedChanges, saveProgressToApi]);
 
   // === Detect unsaved changes ===
   useEffect(() => {
-    const checkUnsaved = () => {
-      if (!trackedRef.current || !currentDoc) return;
-      const isDirty = trackedRef.current.innerHTML !== originalTrackedHtmlRef.current;
-      setUnsavedChanges(isDirty);
-    };
-    const observer = new MutationObserver(checkUnsaved);
-    if (trackedRef.current) {
-      observer.observe(trackedRef.current, { childList: true, subtree: true, characterData: true });
-      checkUnsaved();
+    if (!trackedRef.current || !currentDoc) return;
+
+    if (mutationObserverRef.current) {
+      mutationObserverRef.current.disconnect();
     }
+
+    const observer = new MutationObserver(() => {
+      if (trackedRef.current) {
+        const isDirty = trackedRef.current.innerHTML !== originalTrackedHtmlRef.current;
+        setUnsavedChanges(isDirty);
+      }
+    });
+
+    observer.observe(trackedRef.current, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
+    mutationObserverRef.current = observer;
     return () => observer.disconnect();
   }, [currentDoc]);
 
-  // === Load diff.js ===
+  // === Render tracked content ===
   useEffect(() => {
-    if (typeof window !== 'undefined' && !(window as any).Diff) {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/diff@5.1.0/dist/diff.min.js';
-      script.async = true;
-      document.head.appendChild(script);
-      return () => {
-        if (document.head.contains(script)) {
-          document.head.removeChild(script);
-        }
-      };
+    if (!trackedRef.current || !trackedHtmlState) return;
+
+    if (isLoadingContent) {
+      trackedRef.current.innerHTML = '<div class="loading-spinner">Loading document...</div>';
+      return;
     }
-  }, []);
+
+    trackedRef.current.innerHTML = trackedHtmlState;
+
+    if (trackedHtmlState.length > VIRTUALIZATION_THRESHOLD) {
+      renderVirtualizedContent(trackedHtmlState);
+    }
+
+    attachAcceptRejectHandlers();
+  }, [trackedHtmlState, isLoadingContent, renderVirtualizedContent, attachAcceptRejectHandlers]);
 
   return (
     <div className="flex h-screen bg-[#fafafa] text-[#333]">
@@ -455,21 +630,23 @@ export default function EditTrackedPage() {
                 <button
                   id="save-btn"
                   onClick={saveProgress}
-                  disabled={!unsavedChanges || isSaving}
+                  disabled={!unsavedChanges || isSaving || isLoadingContent}
                   className={`px-3 py-1.5 text-sm rounded ${
-                    unsavedChanges
+                    unsavedChanges && !isLoadingContent
                       ? 'bg-green-600 text-white hover:bg-green-700'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   }`}
                 >
-                  💾 {isSaving ? 'Saving...' : 'Save Progress'}
+                  💾 {isLoadingContent ? 'Loading...' : isSaving ? 'Saving...' : 'Save Progress'}
                 </button>
               </div>
               <div
                 id="tracked"
                 ref={trackedRef}
-                contentEditable={!isApplyingChangeRef.current}
-                className="content-box p-3 bg-white border border-[#ddd] rounded whitespace-pre-wrap text-sm max-h-[40vh] overflow-y-auto"
+                contentEditable={!isApplyingChangeRef.current && !isLoadingContent}
+                className={`content-box p-3 bg-white border border-[#ddd] rounded whitespace-pre-wrap text-sm max-h-[40vh] overflow-y-auto ${
+                  isLoadingContent ? 'opacity-50 cursor-wait' : ''
+                }`}
                 style={{ whiteSpace: 'pre-wrap' }}
               />
               {saveError && <p className="text-red-600 text-sm mt-1">{saveError}</p>}
@@ -492,6 +669,20 @@ export default function EditTrackedPage() {
         * {
           box-sizing: border-box;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .loading-spinner {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100px;
+          color: #666;
+          font-style: italic;
+        }
+
+        .virtualized-container {
+          position: relative;
+          min-height: 100%;
         }
 
         del {
@@ -529,6 +720,10 @@ export default function EditTrackedPage() {
           flex-direction: row;
         }
 
+        .change-group:hover .change-action {
+          display: flex !important;
+        }
+
         .change-action button {
           padding: 2px 6px;
           font-size: 12px;
@@ -545,10 +740,6 @@ export default function EditTrackedPage() {
         }
         .change-action button.reject-change {
           color: red;
-        }
-
-        .change-group:hover .change-action {
-          display: flex !important;
         }
 
         .content-box {
