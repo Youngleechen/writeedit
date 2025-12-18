@@ -12,6 +12,7 @@ export function EditorUI() {
   const trackedRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ✅ Destructure hooks ONCE — no duplicates
   const {
     documents,
     isLoading: isDocLoading,
@@ -26,8 +27,8 @@ export function EditorUI() {
     editedText,
     editLevel,
     customInstruction,
-    isLoading,
-    error,
+    isLoading: isEditorLoading,
+    error: editorError,
     viewMode,
     wordCount,
     documentId,
@@ -36,29 +37,37 @@ export function EditorUI() {
     setEditLevel,
     setCustomInstruction,
     setViewMode,
-    applyEdit,
+    setEditedText,
+    setDocumentId,
   } = editor;
 
+  // ✅ Local state for async job flow
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+
   const [documentName, setDocumentName] = useState('');
-  const [showDocuments, setShowDocuments] = useState(false); // Hidden by default
+  const [showDocuments, setShowDocuments] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Auto-show document panel after first edit
   useEffect(() => {
-    if (editedText && !isLoading) {
+    if (editedText && !isEditorLoading && !isProcessing) {
       setShowDocuments(true);
     }
-  }, [editedText, isLoading]);
+  }, [editedText, isEditorLoading, isProcessing]);
 
+  // Auto-generate document name
   useEffect(() => {
     if (!documentName.trim() && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
       setDocumentName(name);
     }
-  }, [inputText]);
+  }, [inputText, documentName]);
 
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
-    if (!trackedRef.current) return editedText;
+    if (!trackedRef.current) return editedText || '';
 
     const clone = trackedRef.current.cloneNode(true) as HTMLElement;
     clone.querySelectorAll('.change-action, del').forEach(el => el.remove());
@@ -73,7 +82,7 @@ export function EditorUI() {
       group.remove();
     });
 
-    return clone.textContent?.trim() || editedText;
+    return clone.textContent?.trim() || editedText || '';
   }, [editedText]);
 
   const handleCopy = async () => {
@@ -113,7 +122,7 @@ export function EditorUI() {
     }
     const id = await saveDocument(final, original, documentName);
     if (id) {
-      editor.setDocumentId(id);
+      setDocumentId(id);
       setDocumentName('');
     }
   };
@@ -129,7 +138,7 @@ export function EditorUI() {
   };
 
   const handleDocumentClick = (doc: SavedDocument) => {
-    editor.loadDocument(doc.id, {
+    editor.loadDocument?.(doc.id, {
       originalText: doc.original_text,
       editedText: doc.edited_text,
       level: doc.level,
@@ -163,7 +172,7 @@ export function EditorUI() {
         });
         text = reader.result as string;
       } else {
-        alert('SupportedContent type. Please upload .docx or .doc files only.');
+        alert('Unsupported content type. Please upload .docx or .doc files only.');
         setSelectedFile(null);
         return;
       }
@@ -190,6 +199,85 @@ export function EditorUI() {
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
+
+  // ✅ Async Edit with Job Polling
+  const applyEditAsync = useCallback(async () => {
+    if (!inputText.trim()) {
+      setProcessingError('Input required');
+      return;
+    }
+
+    setIsProcessing(true);
+    setProcessingError(null);
+    setJobId(null);
+
+    try {
+      const response = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: inputText,
+          instruction: editLevel === 'custom' ? customInstruction : '',
+          model: 'x-ai/grok-4.1-fast:free',
+          editLevel,
+          useEditorialBoard: false,
+          numVariations: 1,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Unknown error');
+      }
+
+      const { jobId: newJobId } = await response.json();
+      setJobId(newJobId);
+
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/edit/status?jobId=${newJobId}`);
+          if (!statusRes.ok) {
+            throw new Error('Failed to fetch job status');
+          }
+          const statusData = await statusRes.json();
+
+          if (statusData.status === 'completed') {
+            clearInterval(interval);
+            setPollInterval(null);
+            setIsProcessing(false);
+            setEditedText(statusData.result.editedText);
+            setViewMode('tracked');
+          } else if (statusData.status === 'failed') {
+            clearInterval(interval);
+            setPollInterval(null);
+            setIsProcessing(false);
+            setProcessingError(statusData.error || 'Processing failed');
+          }
+        } catch (err) {
+          clearInterval(interval);
+          setPollInterval(null);
+          setIsProcessing(false);
+          setProcessingError('Error checking processing status');
+        }
+      }, 2000);
+
+      setPollInterval(interval);
+    } catch (err: unknown) {
+      setIsProcessing(false);
+      setProcessingError(err instanceof Error ? err.message : 'An error occurred');
+    }
+  }, [inputText, editLevel, customInstruction, setEditedText, setViewMode]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [pollInterval]);
+
+  // Combine loading and error states
+  const isLoading = isEditorLoading || isProcessing || isDocLoading;
+  const combinedError = processingError || editorError || docError;
 
   return (
     <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6 bg-white text-black min-h-screen">
@@ -282,11 +370,11 @@ export function EditorUI() {
         )}
       </div>
 
-      {/* === 3. ✨ Edit Button — Now right after controls! === */}
+      {/* === 3. Edit Button === */}
       <div>
         <button
           id="edit-btn"
-          onClick={applyEdit}
+          onClick={applyEditAsync}
           disabled={isLoading || !inputText.trim()}
           className={`px-4 py-2 rounded-md font-medium ${
             isLoading
@@ -298,13 +386,13 @@ export function EditorUI() {
         >
           {isLoading ? '⏳ Processing...' : '✨ Edit'}
         </button>
-        {(error || docError) && (
-          <p className="mt-2 text-red-600 text-sm">{error || docError}</p>
+        {combinedError && (
+          <p className="mt-2 text-red-600 text-sm">{combinedError}</p>
         )}
       </div>
 
       {/* === 4. Edited Result === */}
-      {(editedText || isLoading) && (
+      {(editedText || isLoading || jobId) && (
         <div>
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold text-black">Edited Result</h2>
@@ -313,6 +401,7 @@ export function EditorUI() {
                 id="copy-btn"
                 onClick={handleCopy}
                 className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
+                disabled={!editedText}
               >
                 📋 Copy
               </button>
@@ -320,62 +409,74 @@ export function EditorUI() {
                 id="download-btn"
                 onClick={handleDownload}
                 className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
+                disabled={!editedText}
               >
                 💾 Download
               </button>
             </div>
           </div>
 
-          <div className="flex mb-2">
-            <button
-              className={`px-3 py-1 text-sm ${
-                viewMode === 'clean'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              }`}
-              onClick={() => setViewMode('clean')}
-            >
-              Clean View
-            </button>
-            <button
-              className={`px-3 py-1 text-sm ml-1 ${
-                viewMode === 'tracked'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              }`}
-              onClick={() => setViewMode('tracked')}
-            >
-              Tracked Changes ({changeCount} change{changeCount !== 1 ? 's' : ''})
-            </button>
-          </div>
+          {isProcessing && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 mb-4">
+              <p>🚀 Your document is being processed. This may take a few moments.</p>
+              <p className="text-sm mt-1">You can close this tab and come back later.</p>
+            </div>
+          )}
 
-          <div
-            ref={trackedRef}
-            className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm text-black"
-            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
-          >
-            {viewMode === 'clean' ? (
-              editedText || 'Result will appear here...'
-            ) : (
-              <TrackedChangesView
-                key={documentId || 'new'}
-                originalText={inputText}
-                editedText={editedText}
-                onAcceptChange={handleAcceptChange}
-                onRejectChange={handleRejectChange}
-              />
-            )}
-          </div>
+          {editedText && (
+            <>
+              <div className="flex mb-2">
+                <button
+                  className={`px-3 py-1 text-sm ${
+                    viewMode === 'clean'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                  }`}
+                  onClick={() => setViewMode('clean')}
+                >
+                  Clean View
+                </button>
+                <button
+                  className={`px-3 py-1 text-sm ml-1 ${
+                    viewMode === 'tracked'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                  }`}
+                  onClick={() => setViewMode('tracked')}
+                >
+                  Tracked Changes ({changeCount} change{changeCount !== 1 ? 's' : ''})
+                </button>
+              </div>
+
+              <div
+                ref={trackedRef}
+                className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm text-black"
+                style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
+              >
+                {viewMode === 'clean' ? (
+                  editedText
+                ) : (
+                  <TrackedChangesView
+                    key={documentId || 'new'}
+                    originalText={inputText}
+                    editedText={editedText}
+                    onAcceptChange={handleAcceptChange}
+                    onRejectChange={handleRejectChange}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {!editedText && !isLoading && (
+      {!editedText && !isLoading && !jobId && (
         <div className="p-3 bg-gray-50 border rounded text-gray-500 text-sm">
           Result will appear here after you click “Edit”.
         </div>
       )}
 
-      {/* === 5. Document Management (auto-shows after edit) === */}
+      {/* === 5. Document Management === */}
       <div className="border-t border-gray-300 pt-4">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold text-black">Document Management</h2>
@@ -401,7 +502,7 @@ export function EditorUI() {
               <button
                 id="save-document-btn"
                 onClick={handleSaveDocument}
-                disabled={isLoading || isDocLoading || !editedText}
+                disabled={isLoading || !editedText}
                 className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
               >
                 💾 Save Document
@@ -409,7 +510,7 @@ export function EditorUI() {
               <button
                 id="save-progress-btn"
                 onClick={handleSaveProgress}
-                disabled={!documentId || isLoading || isDocLoading || !editedText}
+                disabled={!documentId || isLoading || !editedText}
                 className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
               >
                 🔄 Save Progress

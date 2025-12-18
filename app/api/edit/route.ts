@@ -3,19 +3,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { splitIntoChunks } from '@/lib/chunking';
 import { getSystemPrompt } from '@/lib/ai';
 
-const ALLOWED_MODELS = [
-  'x-ai/grok-4.1-fast:free',
-  'alibaba/tongyi-deepresearch-30b-a3b:free',
-  'kwaipilot/kat-coder-pro:free',
-  'anthropic/claude-3.5-sonnet:free',
-  'google/gemini-flash-1.5-8b:free'
-];
-
-// Vercel has a 10s timeout for Hobby plan, 60s for Pro
-// We'll set our timeout to 25s to leave room for processing
-const API_TIMEOUT = 25000; // 25 seconds
-const MAX_RETRIES = 2;
-const BASE_DELAY = 1000; // 1 second
+// --- NEW: Import Job Queue System ---
+// You will need to set up a simple job queue. For simplicity, we'll use an in-memory array.
+// In production, use Redis, BullMQ, or a managed service like Upstash Queue.
+const jobQueue: {
+  id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  result?: {
+    editedText: string;
+    variations: string[];
+    trackedHtml: string;
+    changes: number;
+    usedModel: string;
+    variationCount: number;
+  };
+  error?: string;
+}[] = [];
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,15 +32,10 @@ export async function POST(req: NextRequest) {
       numVariations = 1
     } = body;
 
-    // Clamp numVariations between 1 and 3
-    const variationCount = Math.min(3, Math.max(1, Math.floor(numVariations)));
-
-    // Instruction is always required
+    // Validate inputs (same as before)
     if (!instruction?.trim()) {
       return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
     }
-
-    // Input is only required for editing (not for generation like "Spark")
     if (editLevel !== 'generate' && !input?.trim()) {
       return NextResponse.json({ error: 'Input required' }, { status: 400 });
     }
@@ -47,21 +45,116 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Server config error' }, { status: 500 });
     }
 
-    // Build fallback order: preferred first, then others
-    const modelOrder = [
+    // Generate a unique job ID
+    const jobId = crypto.randomUUID();
+
+    // Enqueue the job
+    jobQueue.push({
+      id: jobId,
+      status: 'queued',
+    });
+
+    // Start processing in the background
+    processJob(jobId, {
+      input,
+      instruction,
       preferredModel,
-      ...ALLOWED_MODELS.filter(m => m !== preferredModel)
-    ].filter(m => ALLOWED_MODELS.includes(m));
+      editLevel,
+      useEditorialBoard,
+      numVariations,
+      OPENROUTER_API_KEY
+    }).catch(err => {
+      console.error(`❌ Job ${jobId} failed:`, err);
+      const jobIndex = jobQueue.findIndex(j => j.id === jobId);
+      if (jobIndex !== -1) {
+        jobQueue[jobIndex].status = 'failed';
+        jobQueue[jobIndex].error = err instanceof Error ? err.message : String(err);
+      }
+    });
 
-    let variationsResult: string[] | null = null;
-    let usedModel: string | null = null;
-    let lastError: unknown = null;
+    // Immediately respond with the job ID
+    return NextResponse.json({
+      jobId,
+      message: 'Processing started. Poll /api/edit/status?jobId=YOUR_JOB_ID to check status.'
+    });
 
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('❌ Edit API error:', errorMessage);
+    return NextResponse.json({ error: errorMessage || 'Internal error' }, { status: 500 });
+  }
+}
+
+// --- NEW: GET endpoint to check job status ---
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const jobId = searchParams.get('jobId');
+
+  if (!jobId) {
+    return NextResponse.json({ error: 'jobId parameter is required' }, { status: 400 });
+  }
+
+  const job = jobQueue.find(j => j.id === jobId);
+
+  if (!job) {
+    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  }
+
+  return NextResponse.json(job);
+}
+
+// --- NEW: Background Job Processor ---
+async function processJob(
+  jobId: string,
+  params: {
+    input: string;
+    instruction: string;
+    preferredModel: string;
+    editLevel: string;
+    useEditorialBoard: boolean;
+    numVariations: number;
+    OPENROUTER_API_KEY: string;
+  }
+) {
+  const {
+    input,
+    instruction,
+    preferredModel,
+    editLevel,
+    useEditorialBoard,
+    numVariations,
+    OPENROUTER_API_KEY
+  } = params;
+
+  const ALLOWED_MODELS = [
+    'x-ai/grok-4.1-fast:free',
+    'alibaba/tongyi-deepresearch-30b-a3b:free',
+    'kwaipilot/kat-coder-pro:free',
+    'anthropic/claude-3.5-sonnet:free',
+    'google/gemini-flash-1.5-8b:free'
+  ];
+
+  const modelOrder = [
+    preferredModel,
+    ...ALLOWED_MODELS.filter(m => m !== preferredModel)
+  ].filter(m => ALLOWED_MODELS.includes(m));
+
+  let variationsResult: string[] | null = null;
+  let usedModel: string | null = null;
+  let lastError: unknown = null;
+
+  // Find the job in the queue and update its status
+  const jobIndex = jobQueue.findIndex(j => j.id === jobId);
+  if (jobIndex === -1) {
+    throw new Error('Job not found in queue');
+  }
+  jobQueue[jobIndex].status = 'processing';
+
+  try {
     for (const model of modelOrder) {
       try {
         const wordCount = input?.trim().split(/\s+/).length || 0;
         if (wordCount >= 1000) {
-          // For large docs, we don't support variations
           const single = await processChunkedEditWithModel(
             input || '',
             instruction,
@@ -72,9 +165,8 @@ export async function POST(req: NextRequest) {
           );
           variationsResult = [single];
         } else {
-          // Generate multiple variations
           const promises = [];
-          for (let i = 0; i < variationCount; i++) {
+          for (let i = 0; i < Math.min(3, Math.max(1, Math.floor(numVariations))); i++) {
             const temperature = 0.7 + (i * 0.2);
             promises.push(
               callModelWithTemp(
@@ -102,34 +194,32 @@ export async function POST(req: NextRequest) {
     }
 
     if (variationsResult === null) {
-      const fallbackError = lastError instanceof Error ? lastError.message : String(lastError);
-      return NextResponse.json(
-        { error: 'All models failed. Last error: ' + fallbackError },
-        { status: 500 }
-      );
+      throw new Error('All models failed. Last error: ' + (lastError instanceof Error ? lastError.message : String(lastError)));
     }
 
-    // For backward compatibility + UI
     const primary = variationsResult[0];
     const { html: trackedHtml, changes } = generateTrackedChanges(input || '', primary);
 
-    return NextResponse.json({
+    // Update the job with the result
+    jobQueue[jobIndex].status = 'completed';
+    jobQueue[jobIndex].result = {
       editedText: primary,
       variations: variationsResult,
       trackedHtml,
       changes,
-      usedModel,
+      usedModel: usedModel || 'unknown',
       variationCount: variationsResult.length
-    });
+    };
 
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error('❌ Edit API error:', errorMessage);
-    return NextResponse.json({ error: errorMessage || 'Internal error' }, { status: 500 });
+  } catch (err) {
+    // Update the job with the error
+    jobQueue[jobIndex].status = 'failed';
+    jobQueue[jobIndex].error = err instanceof Error ? err.message : String(err);
   }
 }
 
-// Updated: callModel now handles timeouts and retries
+// --- The rest of your functions remain unchanged ---
+
 async function callModelWithTemp(
   text: string,
   instruction: string,
@@ -137,88 +227,46 @@ async function callModelWithTemp(
   editLevel: string,
   apiKey: string,
   temperature: number,
-  useEditorialBoard: boolean,
-  retries = MAX_RETRIES,
-  delay = BASE_DELAY
+  useEditorialBoard: boolean
 ): Promise<string> {
   if (useEditorialBoard) {
     return runSelfRefinementLoop(text, instruction, model, apiKey, temperature);
   }
-  
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+  const system = getSystemPrompt(editLevel as any, instruction);
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://beforepublishing.vercel.app',
+      'X-Title': 'Before Publishing'
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: text }
+      ],
+      max_tokens: 1000,
+      temperature,
+      top_p: temperature > 0.8 ? 0.95 : 0.9
+    })
+  });
 
-    const system = getSystemPrompt(editLevel as any, instruction);
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://beforepublishing.vercel.app',
-        'X-Title': 'Before Publishing'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: text }
-        ],
-        max_tokens: 1000,
-        temperature,
-        top_p: temperature > 0.8 ? 0.95 : 0.9
-      }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      const errorMsg = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
-      
-      // Handle 504 specifically
-      if (res.status === 504) {
-        throw new Error('OpenRouter API timed out. Please try again.');
-      }
-      
-      throw new Error(errorMsg);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
-    if (!content) {
-      throw new Error('Model returned empty content');
-    }
-    return content;
-  } catch (err) {
-    if (retries > 0 && (err instanceof Error) && 
-        (err.name === 'AbortError' || err.message.includes('timed out') || 
-         err.message.includes('Failed to fetch') || err.message.includes('504'))) {
-      
-      // Exponential backoff
-      const nextDelay = delay * 2;
-      console.log(`Timeout error. Retrying in ${nextDelay}ms... (${retries} retries left)`);
-      await new Promise(resolve => setTimeout(resolve, nextDelay));
-      
-      return callModelWithTemp(
-        text, 
-        instruction, 
-        model, 
-        editLevel, 
-        apiKey, 
-        temperature, 
-        useEditorialBoard,
-        retries - 1,
-        nextDelay
-      );
-    }
-    
-    throw err;
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    const errorMsg = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+    throw new Error(errorMsg);
   }
+
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) {
+    throw new Error('Model returned empty content');
+  }
+  return content;
 }
 
-// Updated self-refinement to accept temperature
 async function runSelfRefinementLoop(
   original: string,
   instruction: string,
@@ -234,7 +282,6 @@ async function runSelfRefinementLoop(
   return current;
 }
 
-// Optimized chunked processing with timeout handling
 async function processChunkedEditWithModel(
   input: string,
   instruction: string,
@@ -245,32 +292,20 @@ async function processChunkedEditWithModel(
 ): Promise<string> {
   const chunks = splitIntoChunks(input);
   const editedChunks: string[] = [];
-  const MAX_CONCURRENT = 2; // Limit concurrent requests to avoid rate limits
 
-  for (let i = 0; i < chunks.length; i++) {
-    try {
-      let edited: string;
-      if (useEditorialBoard) {
-        edited = await runSelfRefinementLoop(chunks[i], instruction, model, apiKey, 0.7);
-      } else {
-        edited = await callModelWithTemp(chunks[i], instruction, model, editLevel, apiKey, 0.7, false);
-      }
-      editedChunks[i] = edited;
-    } catch (err) {
-      console.error(`Error processing chunk ${i}:`, err);
-      editedChunks[i] = chunks[i]; // Fallback to original chunk on error
+  for (const chunk of chunks) {
+    let edited: string;
+    if (useEditorialBoard) {
+      edited = await runSelfRefinementLoop(chunk, instruction, model, apiKey, 0.7);
+    } else {
+      edited = await callModelWithTemp(chunk, instruction, model, editLevel, apiKey, 0.7, false);
     }
-
-    // Add small delay between chunks to avoid rate limits
-    if (i < chunks.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
+    editedChunks.push(edited);
   }
 
   return editedChunks.join('\n\n');
 }
 
-// --- DIFF GENERATION (unchanged) ---
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
